@@ -10,25 +10,34 @@ import {
 import { NavLink, Navigate, Route, Routes, useParams } from "react-router-dom";
 import {
   Activity,
+  AlertTriangle,
   Archive,
   ArrowUpRight,
   BriefcaseBusiness,
   CheckCircle2,
+  ChevronDown,
   ChevronRight,
+  CircleHelp,
   ClipboardCheck,
+  Copy,
   Clock3,
+  Eraser,
   FileText,
   Filter,
+  ImagePlus,
   LayoutDashboard,
   ListChecks,
   LogOut,
   Menu,
   PanelLeftClose,
   Plus,
+  RefreshCw,
   Search,
+  Send,
   Settings,
   ShieldCheck,
   Sparkles,
+  Upload,
   UsersRound,
   WalletCards,
   X,
@@ -39,10 +48,17 @@ import {
   formatDate,
   session,
   type Activity as ActivityItem,
+  type CompletedWorkItem,
   type Contract,
   type DocumentItem,
+  type FinancePaymentDetail,
+  type FinancePaymentItem,
+  type FinanceWorkbenchResponse,
   type Lead,
   type LeadState,
+  type LocationAnalysisAnswer,
+  type LocationAnalysisQuestion,
+  type LocationAnalysisResponse,
   type ProductLine,
   type Role,
   type SigningRequest,
@@ -166,6 +182,9 @@ function relativeAge(value: string) {
   const days = ageInDays(value);
   return days === 0 ? "today" : days === 1 ? "1d" : `${days}d`;
 }
+function formatDateTime(value: string) {
+  return new Intl.DateTimeFormat("en-PH", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" }).format(new Date(value));
+}
 function isOverdueLead(lead: Lead) {
   return lead.state === "FollowUp" || ageInDays(lead.updatedAt) >= 7;
 }
@@ -192,8 +211,187 @@ function leadFlag(lead: Lead) {
 type NextStep = { label: string; detail: string; tab: string };
 
 const contractTemplateOptions = [
-  { code: "STANDARD_FRANCHISE", label: "Standard Franchise Agreement" },
+  {
+    code: "STANDARD_FRANCHISE",
+    label: "Dr. Care Animal Bite Clinic Franchise Agreement",
+  },
 ] as const;
+
+const sourceOfIncomeOptions = [
+  "Employment / salary",
+  "Business income",
+  "Professional practice",
+  "Investments / dividends",
+  "Rental income",
+  "Pension / retirement",
+  "Remittances / OFW income",
+  "Savings / personal funds",
+  "Loan / financing",
+  "Inheritance / family support",
+  "Others",
+] as const;
+
+const industryOptions = [
+  "Healthcare / medical",
+  "Pharmacy / drugstore",
+  "Dental",
+  "Veterinary / animal care",
+  "Food and beverage",
+  "Retail / trading",
+  "Education / training",
+  "Real estate / property",
+  "Construction / engineering",
+  "Manufacturing",
+  "Professional services",
+  "Financial services / insurance",
+  "Information technology",
+  "Agriculture / farming",
+  "Government / public service",
+  "Others",
+] as const;
+
+const discussionTimeOptions = [
+  "Morning (8 AM–12 PM)",
+  "Afternoon (12 PM–5 PM)",
+  "Evening (5 PM–8 PM)",
+  "Weekdays",
+  "Weekends",
+  "To be scheduled",
+] as const;
+
+function normalizedDiscussionTime(value?: string | null) {
+  if (discussionTimeOptions.includes(value as (typeof discussionTimeOptions)[number]))
+    return value ?? "";
+  return value === "Yes" ? "To be scheduled" : "";
+}
+
+function SourceOfIncomeField({
+  value,
+  onChange,
+  required = false,
+  invalid = false,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  required?: boolean;
+  invalid?: boolean;
+}) {
+  const isStandard = sourceOfIncomeOptions.some(
+    (option) => option !== "Others" && option === value,
+  );
+  const [choice, setChoice] = useState(
+    value ? (isStandard ? value : "Others") : "",
+  );
+  useEffect(() => {
+    if (value) {
+      const standard = sourceOfIncomeOptions.some(
+        (option) => option !== "Others" && option === value,
+      );
+      setChoice(standard ? value : "Others");
+    } else if (choice !== "Others") {
+      setChoice("");
+    }
+  }, [value, choice]);
+  return (
+    <label>
+      <span>
+        Source of income{required ? <span className="required-mark"> *</span> : null}
+      </span>
+      <select
+        value={choice}
+        required={required}
+        aria-invalid={invalid}
+        className={invalid ? "field-missing" : undefined}
+        onChange={(event) => {
+          const next = event.target.value;
+          setChoice(next);
+          onChange(next === "Others" ? "" : next);
+        }}
+      >
+        <option value="">Select source of income</option>
+        {sourceOfIncomeOptions.map((option) => (
+          <option key={option}>{option}</option>
+        ))}
+      </select>
+      {choice === "Others" ? (
+        <input
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          placeholder="Specify source of income"
+          required={required}
+          maxLength={160}
+          aria-label="Other source of income"
+          aria-invalid={invalid}
+          className={invalid ? "field-missing" : undefined}
+        />
+      ) : null}
+    </label>
+  );
+}
+
+function IndustryField({
+  value,
+  onChange,
+  required = false,
+  invalid = false,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  required?: boolean;
+  invalid?: boolean;
+}) {
+  const isStandard = industryOptions.some(
+    (option) => option !== "Others" && option === value,
+  );
+  const [choice, setChoice] = useState(
+    value ? (isStandard ? value : "Others") : "",
+  );
+  useEffect(() => {
+    if (value) {
+      const standard = industryOptions.some(
+        (option) => option !== "Others" && option === value,
+      );
+      setChoice(standard ? value : "Others");
+    } else if (choice !== "Others") {
+      setChoice("");
+    }
+  }, [value, choice]);
+  return (
+    <label>
+      <span>
+        Industry{required ? <span className="required-mark"> *</span> : null}
+      </span>
+      <select
+        value={choice}
+        required={required}
+        aria-invalid={invalid}
+        className={invalid ? "field-missing" : undefined}
+        onChange={(event) => {
+          const next = event.target.value;
+          setChoice(next);
+          onChange(next === "Others" ? "" : next);
+        }}
+      >
+        <option value="">Select industry</option>
+        {industryOptions.map((option) => (
+          <option key={option}>{option}</option>
+        ))}
+      </select>
+      {choice === "Others" ? (
+        <input
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          placeholder="Specify industry"
+          required={required}
+          maxLength={160}
+          aria-label="Other industry"
+          aria-invalid={invalid}
+          className={invalid ? "field-missing" : undefined}
+        />
+      ) : null}
+    </label>
+  );
+}
 
 function contractTemplateLabel(code?: string | null) {
   return (
@@ -229,12 +427,69 @@ function normaliseLocationDecision(
   return "Pending";
 }
 
+const locationAnalysisQuestions: LocationAnalysisQuestion[] = [
+  ["SITE_01", "Site & Lease", "Does the location meet the location/site/guidelines/suggestions?"],
+  ["SITE_02", "Site & Lease", "Does the location match the fitness of purpose and the franchise concept?"],
+  ["SITE_03", "Site & Lease", "Is the monthly rental fees reasonable for the intended location?"],
+  ["SITE_04", "Site & Lease", "Is the terms of the lease generally favorable to the franchisee?"],
+  ["SITE_05", "Site & Lease", "Is the area classified as city, 1st or 2nd class municipality?"],
+  ["PHYSICAL_01", "Physical Requirements", "Is the lease property located in the ground floor of the building with other business leasing the property?"],
+  ["PHYSICAL_02", "Physical Requirements", "Is your location in an area without zonal restriction in operating a pharmacy?"],
+  ["PHYSICAL_03", "Physical Requirements", "Does the size fit the franchisor’s standard requirements?", "3-meter front area; 30 sqm floor area."],
+  ["PHYSICAL_04", "Physical Requirements", "Do they have the electrical, plumbing and telecommunication capability needed to run the business equipment from your Franchise?"],
+  ["PHYSICAL_05", "Physical Requirements", "Is the location visibly and readily exposed? Is the location house in a well-constructed relatively new building?"],
+  ["PHYSICAL_06", "Physical Requirements", "Is your area with readily available park port of at least 2 cars?"],
+  ["TRAFFIC_01", "Traffic & Accessibility", "Is the foot traffic likely to register at least 100 individuals per hour within the path leading to your location during the peak business hour?"],
+  ["TRAFFIC_02", "Traffic & Accessibility", "Is the foot traffic coming from residential locals and from other barangay/barrio areas?"],
+  ["TRAFFIC_03", "Traffic & Accessibility", "Are there establishment bring in foot traffic to the area? (E g. Churches, School, Hospital and Government Offices)"],
+  ["TRAFFIC_04", "Traffic & Accessibility", "Is the immediate street fronting your location be bi-directional 6-Lane main street?"],
+  ["TRAFFIC_05", "Traffic & Accessibility", "Is the street prompting your location causing traffic during peak business hours?"],
+  ["TRAFFIC_06", "Traffic & Accessibility", "Is the volume of vehicular traffic being at least a minimum of 100 vehicles of all sort within an hour period?"],
+  ["TRAFFIC_07", "Traffic & Accessibility", "Is the location accessible to at least 100 residential houses within 1 km radius?"],
+  ["TRAFFIC_08", "Traffic & Accessibility", "Is the location accessible in all directions to most commercial establishment?"],
+  ["MARKET_01", "Market & Competition", "Does the location and its vicinity have at least 10 reputable or established brand within a 1 km radius in reference to the location of interest?"],
+  ["MARKET_02", "Market & Competition", "Is there an animal bite center of another brand operating within 1 km radius in reference to your location of operation?"],
+  ["MARKET_03", "Market & Competition", "Is there the same franchisee within 1 km in that area? Did the franchisor follow the rules regarding awarding franchisee an area exclusively?"],
+  ["MARKET_04", "Market & Competition", "Are there at least 5 competitor animal bite centers within 1 km in the area?"],
+  ["MARKET_05", "Market & Competition", "Can you identify your biggest competitor in the area?"],
+  ["COMMUNITY_01", "Community & Environment", "Is your area considered within the vicinity of a tourist spot/tourism?"],
+  ["COMMUNITY_02", "Community & Environment", "Is there an annual event of citywide proportion that utilize the immediate street fronting your location?"],
+  ["COMMUNITY_03", "Community & Environment", "Are there current or future infrastructure developments in the area that may positively impact your franchise business? (Road Widening; Mid-Rise Condominium Bldg.)"],
+  ["GROWTH_01", "Growth & Sales Potential", "Do you likely to perceive a monthly sales projection between ₱150,000 - ₱300,000 for the potential location?"],
+  ["GROWTH_02", "Growth & Sales Potential", "Does your location create an atmosphere of “conveniently located “?"],
+  ["GROWTH_03", "Growth & Sales Potential", "Do you likely to perceive present and future growth potential within the area of operation?"],
+  ["GROWTH_04", "Growth & Sales Potential", "Is the area in which you are located is supported by a strong economic bas? (E g nearby industries working full time)"],
+].map(([code, group, prompt, hint]) => ({ code, group, prompt, hint }));
+
+const locationAnalysisResponseLabels: Record<string, string> = {
+  YES_COMPLETELY: "Yes, completely",
+  YES_PARTIALLY: "Yes, partially",
+  NO: "No",
+  DONT_KNOW: "Don't know",
+};
+const locationAnalysisGroups = [
+  "Site & Lease",
+  "Physical Requirements",
+  "Traffic & Accessibility",
+  "Market & Competition",
+  "Community & Environment",
+  "Growth & Sales Potential",
+];
+const leaseOwnershipOptions = [
+  ["LEASED", "Leased"],
+  ["OWNED", "Owned"],
+  ["SHARED", "Shared / co-located"],
+  ["PENDING", "Pending confirmation"],
+  ["DONT_KNOW", "Don't know"],
+] as const;
+
 const lifecycleSteps = [
   { label: "Inquiry", tab: "Inquiry" },
   { label: "Qualification", tab: "Qualification" },
   { label: "Invoice & Documents", tab: "Workflow" },
   { label: "Finance verification", tab: "Workflow" },
   { label: "Contract", tab: "Contract" },
+  { label: "Signed agreement review", tab: "Workflow" },
   { label: "Pre-launch", tab: "Pre-launch" },
   { label: "Handoff", tab: "Handoff" },
 ];
@@ -252,8 +507,9 @@ function workflowStateIndex(
   if (state === "DownPaymentConfirmed") return 4;
   if (["ContractDrafting", "ContractReview"].includes(state))
     return 4;
-  if (["ContractSigned", "PreLaunch"].includes(state)) return 5;
-  return 6;
+  if (state === "ContractSigned") return 5;
+  if (state === "PreLaunch") return 6;
+  return 7;
 }
 
 function lifecycleStageForLead(
@@ -343,9 +599,9 @@ function nextStepForLead(lead: Lead, submittedForFinance = false): NextStep {
       };
     case "ContractSigned":
       return {
-        label: "Complete pre-launch",
+        label: "Review signed contract",
         detail:
-          "Initialize and complete the product-specific readiness checklist.",
+          "Review the final signed agreement, then explicitly start the product-specific readiness checklist.",
         tab: "Workflow",
       };
     case "PreLaunch":
@@ -384,6 +640,28 @@ function nextActionOwnerForLead(
     default:
       return assignedAgent;
   }
+}
+
+function isMyCurrentAction(
+  lead: Lead,
+  user: NonNullable<typeof session.user>,
+) {
+  const owner = nextActionOwnerForLead(
+    lead,
+    Boolean(lead.downPaymentSubmittedForFinance),
+  );
+  if (lead.assignedAgentId === user.id && owner === (lead.assignedAgentName ?? "Assigned agent")) return true;
+  const roleOwner: Partial<Record<Role, string>> = {
+    MarketingAdmin: "Marketing admin",
+    GeneralManager: "General manager",
+    Finance: "Finance team",
+    AdminTeam: "Admin team",
+  };
+  return roleOwner[user.role] === owner;
+}
+
+function isMyOpportunity(lead: Lead, user: NonNullable<typeof session.user>) {
+  return lead.assignedAgentId === user.id || isMyCurrentAction(lead, user);
 }
 
 const nav: { label: string; to: string; icon: Icon; roles?: Role[] }[] = [
@@ -503,6 +781,8 @@ function App() {
   )?.[1];
   if (publicSigningToken)
     return <ContractSignPage token={decodeURIComponent(publicSigningToken)} />;
+  if (window.location.pathname === "/forgot-password") return <ForgotPasswordPage />;
+  if (window.location.pathname === "/reset-password") return <ResetPasswordPage />;
   const [user, setUser] = useState(session.user);
   const [restoring, setRestoring] = useState(!session.user);
   useEffect(() => {
@@ -616,6 +896,7 @@ function LoginPage({
               {loading ? "Signing in…" : "Sign in"}
               <ArrowUpRight size={17} />
             </button>
+            <a className="auth-link" href="/forgot-password">Forgot your password?</a>
           </form>
           <p className="login-security">
             <ShieldCheck size={16} /> Secure session restores automatically on
@@ -627,9 +908,95 @@ function LoginPage({
   );
 }
 
+function PublicAccountPage({ children }: { children: ReactNode }) {
+  return <main className="login-page"><section className="login-brand"><div className="brand-lockup"><img src="/assets/header-logo-CAyF_Iur.png" alt="Dr. Care Medical Group" /></div><div className="brand-message"><span className="eyebrow">SECURE ACCOUNT ACCESS</span><h1>Always here for the work behind the care.</h1><p>Recover access to your Dr. Care workspace securely.</p></div></section><section className="login-panel"><div className="login-card">{children}</div></section></main>;
+}
+
+function ForgotPasswordPage() {
+  const [email, setEmail] = useState(""); const [busy, setBusy] = useState(false); const [done, setDone] = useState(false); const [error, setError] = useState("");
+  const submit = async (event: FormEvent) => { event.preventDefault(); setBusy(true); setError(""); try { await api.auth.forgotPassword(email); setDone(true); } catch (e) { setError(errorMessage(e, "Unable to request a reset link.")); } finally { setBusy(false); } };
+  return <PublicAccountPage><span className="eyebrow">ACCOUNT RECOVERY</span><h2>Reset your password</h2>{done ? <><p className="muted">If an active account matches that address, a secure reset link has been queued. Check your inbox and junk folder.</p><a className="button button-primary button-wide" href="/">Back to sign in</a></> : <form className="stack-form" onSubmit={submit}><p className="muted">Enter your organization email address. The reset link will expire after 30 minutes.</p><label>Email address<input type="email" required autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} /></label>{error && <div className="form-error" role="alert">{error}</div>}<button className="button button-primary button-wide" disabled={busy}>{busy ? "Requesting…" : "Send reset link"}</button><a className="auth-link" href="/">Back to sign in</a></form>}</PublicAccountPage>;
+}
+
+function ResetPasswordPage() {
+  const params = new URLSearchParams(window.location.search); const token = params.get("token") ?? ""; const email = params.get("email") ?? "";
+  const [password, setPassword] = useState(""); const [confirm, setConfirm] = useState(""); const [busy, setBusy] = useState(false); const [done, setDone] = useState(false); const [error, setError] = useState("");
+  const submit = async (event: FormEvent) => { event.preventDefault(); setError(""); if (password.length < 12) { setError("Use at least 12 characters."); return; } if (password !== confirm) { setError("The passwords do not match."); return; } setBusy(true); try { await api.auth.resetPassword({ token, email, newPassword: password }); setDone(true); } catch (e) { setError(errorMessage(e, "Unable to reset the password.")); } finally { setBusy(false); } };
+  if (!token || !email) return <PublicAccountPage><h2>Invalid reset link</h2><p className="muted">This link is incomplete. Request a new password reset email.</p><a className="button button-primary button-wide" href="/forgot-password">Request new link</a></PublicAccountPage>;
+  return <PublicAccountPage><span className="eyebrow">SECURE PASSWORD RESET</span><h2>{done ? "Password updated" : "Choose a new password"}</h2>{done ? <><p className="muted">Your password has been changed and existing sessions were signed out.</p><a className="button button-primary button-wide" href="/">Sign in</a></> : <form className="stack-form" onSubmit={submit}><p className="muted">Create a password with at least 12 characters.</p><label>New password<input type="password" required minLength={12} autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} /></label><label>Confirm password<input type="password" required minLength={12} autoComplete="new-password" value={confirm} onChange={(e) => setConfirm(e.target.value)} /></label>{error && <div className="form-error" role="alert">{error}</div>}<button className="button button-primary button-wide" disabled={busy}>{busy ? "Updating…" : "Update password"}</button></form>}</PublicAccountPage>;
+}
+
+function trimmedSignatureDataUrl(canvas: HTMLCanvasElement) {
+  const context = canvas.getContext("2d");
+  if (!context) return null;
+  const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
+  let left = canvas.width;
+  let top = canvas.height;
+  let right = -1;
+  let bottom = -1;
+  for (let y = 0; y < canvas.height; y += 1) {
+    for (let x = 0; x < canvas.width; x += 1) {
+      if (pixels[(y * canvas.width + x) * 4 + 3] === 0) continue;
+      left = Math.min(left, x);
+      top = Math.min(top, y);
+      right = Math.max(right, x);
+      bottom = Math.max(bottom, y);
+    }
+  }
+  if (right < left || bottom < top) return null;
+  const padding = Math.max(24, Math.round(Math.min(canvas.width, canvas.height) * 0.12));
+  const sourceLeft = Math.max(0, left - padding);
+  const sourceTop = Math.max(0, top - padding);
+  const sourceRight = Math.min(canvas.width - 1, right + padding);
+  const sourceBottom = Math.min(canvas.height - 1, bottom + padding);
+  const width = sourceRight - sourceLeft + 1;
+  const height = sourceBottom - sourceTop + 1;
+  const trimmedCanvas = document.createElement("canvas");
+  trimmedCanvas.width = width;
+  trimmedCanvas.height = height;
+  trimmedCanvas.getContext("2d")?.drawImage(canvas, sourceLeft, sourceTop, width, height, 0, 0, width, height);
+  return trimmedCanvas.toDataURL("image/png");
+}
+
+async function uploadedSignatureDataUrl(file: File) {
+  if (!["image/png", "image/jpeg", "image/webp"].includes(file.type)) {
+    throw new Error("Please upload a PNG, JPG, or WEBP image.");
+  }
+  if (file.size > 5 * 1024 * 1024) {
+    throw new Error("The signature image must be 5 MB or smaller.");
+  }
+  const objectUrl = URL.createObjectURL(file);
+  try {
+    const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const element = new Image();
+      element.onload = () => resolve(element);
+      element.onerror = () => reject(new Error("The signature image could not be read."));
+      element.src = objectUrl;
+    });
+    const scale = Math.min(1, 1600 / image.naturalWidth, 900 / image.naturalHeight);
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+    canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+    const context = canvas.getContext("2d");
+    if (!context) throw new Error("The signature image could not be processed.");
+    context.drawImage(image, 0, 0, canvas.width, canvas.height);
+    const pixels = context.getImageData(0, 0, canvas.width, canvas.height);
+    for (let index = 0; index < pixels.data.length; index += 4) {
+      const isNearWhite = pixels.data[index] > 242 && pixels.data[index + 1] > 242 && pixels.data[index + 2] > 242;
+      if (isNearWhite) pixels.data[index + 3] = 0;
+    }
+    context.putImageData(pixels, 0, 0);
+    return trimmedSignatureDataUrl(canvas);
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
+}
+
 function ContractSignPage({ token }: { token: string }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const drawing = useRef(false);
+  const hasInk = useRef(false);
   const [request, setRequest] = useState<{
     signerName: string;
     signerRole: string;
@@ -637,6 +1004,10 @@ function ContractSignPage({ token }: { token: string }) {
     documentUrl?: string;
   } | null>(null);
   const [accepted, setAccepted] = useState(false);
+  const [signatureData, setSignatureData] = useState<string | null>(null);
+  const [uploadedPreview, setUploadedPreview] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
   const [status, setStatus] = useState<
     "loading" | "ready" | "signed" | "error"
   >("loading");
@@ -679,25 +1050,53 @@ function ContractSignPage({ token }: { token: string }) {
     context.strokeStyle = "#111827";
     context.lineTo(p.x, p.y);
     context.stroke();
+    hasInk.current = true;
   };
-  const stop = () => {
+  const stop = (event?: ReactPointerEvent<HTMLCanvasElement>) => {
+    if (!drawing.current) return;
     drawing.current = false;
+    if (event?.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    if (hasInk.current) {
+      setUploadedPreview(null);
+      const canvas = event?.currentTarget ?? canvasRef.current;
+      setSignatureData(canvas ? trimmedSignatureDataUrl(canvas) : null);
+    }
   };
   const clear = () => {
     const canvas = canvasRef.current;
     canvas?.getContext("2d")?.clearRect(0, 0, canvas.width, canvas.height);
+    hasInk.current = false;
+    setSignatureData(null);
+    setUploadedPreview(null);
+    setUploadError(null);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+  const upload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
+    setUploadError(null);
+    try {
+      const dataUrl = await uploadedSignatureDataUrl(file);
+      if (!dataUrl) throw new Error("No signature was detected in that image.");
+      const context = canvasRef.current?.getContext("2d");
+      if (canvasRef.current && context) context.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
+      hasInk.current = true;
+      setUploadedPreview(dataUrl);
+      setSignatureData(dataUrl);
+    } catch (e) {
+      setUploadError(e instanceof Error ? e.message : "The signature image could not be processed.");
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    } finally {
+      setUploading(false);
+    }
   };
   const sign = async () => {
-    const canvas = canvasRef.current;
-    if (!canvas || !request || !accepted) return;
-    const context = canvas.getContext("2d");
-    if (
-      !context ||
-      !context
-        .getImageData(0, 0, canvas.width, canvas.height)
-        .data.some((value) => value !== 0)
-    ) {
-      setMessage("Draw your signature before signing.");
+    if (!request || !accepted) return;
+    if (!signatureData) {
+      setMessage("Draw your signature or upload an image before signing.");
       return;
     }
     setMessage("");
@@ -705,7 +1104,7 @@ function ContractSignPage({ token }: { token: string }) {
       await api.publicSigning.sign(token, {
         signerName: request.signerName,
         acceptedTerms: accepted,
-        signatureData: canvas.toDataURL("image/png"),
+        signatureData,
       });
       setStatus("signed");
     } catch (e) {
@@ -774,16 +1173,39 @@ function ContractSignPage({ token }: { token: string }) {
                 onPointerCancel={stop}
                 aria-label="Draw signature"
               />
-              <span>Draw your signature above</span>
+              <div className="signature-input-actions">
+                <span>Draw your signature above</span>
+                <div className="signature-input-buttons">
+                  <label className="signature-upload-button">
+                    <ImagePlus size={15} />
+                    {uploading ? "Processing…" : "Upload image"}
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept="image/png,image/jpeg,image/webp"
+                      onChange={upload}
+                      disabled={uploading}
+                    />
+                  </label>
+                  <button type="button" className="text-link signature-clear-button" onClick={clear} disabled={!hasInk.current || uploading}>
+                    <Eraser size={14} /> Clear
+                  </button>
+                </div>
+              </div>
             </div>
+            {uploadedPreview && (
+              <div className="signature-upload-preview">
+                <span>Uploaded signature preview</span>
+                <div><img src={uploadedPreview} alt="Uploaded signature preview" /></div>
+              </div>
+            )}
+            <p className="signature-upload-hint"><Upload size={13} /> PNG, JPG, or WEBP. The image is processed in your browser and is not saved.</p>
+            {uploadError && <div className="form-error">{uploadError}</div>}
             {message && <div className="form-error">{message}</div>}
             <div className="button-row">
-              <button className="button button-secondary" onClick={clear}>
-                Clear
-              </button>
               <button
                 className="button button-primary"
-                disabled={!accepted}
+                disabled={!accepted || !signatureData || uploading}
                 onClick={sign}
               >
                 Sign contract
@@ -848,8 +1270,8 @@ function Shell({
             <BriefcaseBusiness size={16} />
           </div>
           <div>
-            <strong>Medical Group</strong>
-            <span>Internal workspace</span>
+            <strong>Marketing Operations</strong>
+            <span>Department workspace</span>
           </div>
           <ChevronRight size={15} />
         </div>
@@ -875,13 +1297,6 @@ function Shell({
             })}
         </nav>
         <div className="sidebar-bottom">
-          <div className="sidebar-help">
-            <Sparkles size={16} />
-            <span>
-              <strong>Built to expand</strong>
-              <small>More departments are coming.</small>
-            </span>
-          </div>
           <button className="user-menu" onClick={onLogout}>
             <div className="avatar avatar-small">
               {initials(user.displayName)}
@@ -921,12 +1336,7 @@ function Shell({
             <Route
               path="/finance"
               element={
-                <QueuePage
-                  title="Finance queue"
-                  subtitle="Payment confirmations that need a finance owner."
-                  load={api.queues.finance}
-                  empty="No payment confirmations are waiting."
-                />
+                <FinanceWorkbench />
               }
             />
             <Route
@@ -1168,7 +1578,7 @@ function PipelineContent({
         .includes(search.toLowerCase());
     const matchesFilter =
       filter === "all" ||
-      (filter === "mine" && lead.assignedAgentId === user.id) ||
+      (filter === "mine" && isMyOpportunity(lead, user)) ||
       (filter === "attention" && isAttentionLead(lead)) ||
       (filter === "overdue" && isOverdueLead(lead));
     return matchesSearch && matchesFilter;
@@ -1205,7 +1615,7 @@ function PipelineContent({
           {
             value: "mine" as PipelineFilter,
             label: "My opportunities",
-            count: leads.filter((lead) => lead.assignedAgentId === user.id).length,
+            count: leads.filter((lead) => isMyOpportunity(lead, user)).length,
           },
         ]),
     {
@@ -1394,6 +1804,8 @@ function LeadDetailContent() {
   const { leadId = "" } = useParams();
   const [lead, setLead] = useState<Lead | null>(null);
   const [activities, setActivities] = useState<ActivityItem[]>([]);
+  const [activityPage, setActivityPage] = useState(1);
+  const [activityTotal, setActivityTotal] = useState(0);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [payment, setPayment] = useState<Record<string, unknown> | null>(null);
   const utilityTabs = [
@@ -1423,7 +1835,26 @@ function LeadDetailContent() {
   const [error, setError] = useState("");
   const [activityOpen, setActivityOpen] = useState(false);
   const [taskOpen, setTaskOpen] = useState(false);
+  const [assignmentOpen, setAssignmentOpen] = useState(false);
+  const [assignmentBusy, setAssignmentBusy] = useState(false);
+  const [assignmentId, setAssignmentId] = useState("");
+  const [assignees, setAssignees] = useState<
+    { id: string; displayName: string; role: string; isActive: boolean }[]
+  >([]);
   const [notice, setNotice] = useState<Notice | null>(null);
+  const loadActivities = async (page = 1) => {
+    try {
+      const response = await api.leads.activities(leadId, page);
+      setActivities(response.items);
+      setActivityPage(response.page);
+      setActivityTotal(response.total);
+    } catch (e) {
+      setNotice({
+        message: errorMessage(e, "Unable to load activities."),
+        tone: "error",
+      });
+    }
+  };
   const load = async () => {
     try {
       const nextLead = await api.leads.get(leadId);
@@ -1438,12 +1869,14 @@ function LeadDetailContent() {
             : null;
         setLead(nextLead);
         setActivities([]);
+        setActivityPage(1);
+        setActivityTotal(0);
         setTasks([]);
         setPayment(nextPayment as Record<string, unknown> | null);
         return;
       }
       const [nextActivities, nextTasks] = await Promise.all([
-        api.leads.activities(leadId),
+        api.leads.activities(leadId, 1),
         api.leads.tasks(leadId),
       ]);
       const nextPayment = ["Qualified", "DownPaymentPending"].includes(
@@ -1452,7 +1885,9 @@ function LeadDetailContent() {
         ? await api.leads.downPayment(leadId).catch(() => null)
         : null;
       setLead(nextLead);
-      setActivities(nextActivities);
+      setActivities(nextActivities.items);
+      setActivityPage(nextActivities.page);
+      setActivityTotal(nextActivities.total);
       setTasks(nextTasks);
       setPayment(nextPayment as Record<string, unknown> | null);
     } catch (e) {
@@ -1558,6 +1993,40 @@ function LeadDetailContent() {
     setNotice({ message: "Task created.", tone: "success" });
     await load();
   };
+  const openAssignment = async () => {
+    setAssignmentOpen(true);
+    setAssignmentId(lead.assignedAgentId);
+    try {
+      const users = (await api.users.list()) as typeof assignees;
+      setAssignees(
+        users.filter(
+          (user) =>
+            user.isActive &&
+            ["MarketingAgent", "MarketingAdmin"].includes(user.role),
+        ),
+      );
+    } catch (e) {
+      setNotice({ message: errorMessage(e, "Unable to load owners."), tone: "error" });
+    }
+  };
+  const saveAssignment = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!assignmentId) return;
+    setAssignmentBusy(true);
+    try {
+      await api.leads.assign(lead.id, {
+        assignedAgentId: assignmentId,
+        expectedVersion: lead.version,
+      });
+      setAssignmentOpen(false);
+      setNotice({ message: "Opportunity owner updated.", tone: "success" });
+      await load();
+    } catch (e) {
+      setNotice({ message: errorMessage(e, "Unable to update the owner."), tone: "error" });
+    } finally {
+      setAssignmentBusy(false);
+    }
+  };
   const primaryMeta =
     lead.state === "Qualified"
       ? "Down payment invoice is the next required action"
@@ -1608,6 +2077,11 @@ function LeadDetailContent() {
               onClick={() => setActivityOpen(true)}
             >
               <Plus size={16} /> Add activity
+            </button>
+          )}
+          {session.user?.role === "MarketingAdmin" && lead.state !== "EndorsedToAdmin" && (
+            <button className="button button-secondary" onClick={openAssignment}>
+              <UsersRound size={16} /> Change owner
             </button>
           )}
         </div>
@@ -1715,6 +2189,9 @@ function LeadDetailContent() {
           lead={lead}
           payment={payment}
           activities={activities}
+          activityPage={activityPage}
+          activityTotal={activityTotal}
+          onActivityPageChange={loadActivities}
           onReload={load}
           onNotice={setNotice}
           onAddActivity={() => setActivityOpen(true)}
@@ -1741,6 +2218,37 @@ function LeadDetailContent() {
             onSubmit={saveTask}
             submitLabel="Schedule follow-up"
           />
+        </Modal>
+      )}
+      {assignmentOpen && (
+        <Modal
+          title="Change opportunity owner"
+          subtitle="Marketing Admins can assign an opportunity to an active agent or Marketing Admin, including themselves."
+          onClose={() => setAssignmentOpen(false)}
+        >
+          <form className="stack-form" onSubmit={saveAssignment}>
+            <label>
+              Responsible owner
+              <select
+                value={assignmentId}
+                onChange={(event) => setAssignmentId(event.target.value)}
+                required
+              >
+                <option value="">Select owner</option>
+                {assignees.map((user) => (
+                  <option value={user.id} key={user.id}>
+                    {user.displayName} — {roleLabel(user.role as Role)}
+                    {user.id === session.user?.id ? " (You)" : ""}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <div className="form-actions">
+              <button className="button button-primary" disabled={assignmentBusy || !assignmentId}>
+                {assignmentBusy ? "Saving…" : "Save owner"}
+              </button>
+            </div>
+          </form>
         </Modal>
       )}
     </Page>
@@ -1783,8 +2291,47 @@ function WorkflowActionArea({
   onSchedule: () => void;
 }) {
   const canManageTasks = hasRole(session.user?.role, marketingWriteRoles);
+  const [handoffAcknowledged, setHandoffAcknowledged] = useState(false);
+  useEffect(() => {
+    if (lead.state !== "EndorsedToAdmin") {
+      setHandoffAcknowledged(false);
+      return;
+    }
+    api.leads
+      .endorsement(lead.id)
+      .then((value) => {
+        setHandoffAcknowledged(
+          String((value as Record<string, unknown>).status ?? "").toLowerCase() ===
+            "acknowledged",
+        );
+      })
+      .catch(() => setHandoffAcknowledged(false));
+  }, [lead.id, lead.state]);
   const canPrimary =
     canPrimaryOverride ?? canPerformPrimaryWorkflowAction(lead);
+  if (handoffAcknowledged) {
+    return (
+      <section className="panel workflow-action-area workflow-action-area-complete">
+        <div className="workflow-current">
+          <span>Current status</span>
+          <StatusPill state={lead.state} label="Completed" />
+        </div>
+        <span className="eyebrow">WORKFLOW COMPLETE</span>
+        <h3>Handoff acknowledged</h3>
+        <p className="workflow-action-description">
+          The Admin Team acknowledged this opportunity. No further action is
+          required in the franchise workflow.
+        </p>
+        <div className="completion-card">
+          <CheckCircle2 size={19} />
+          <div>
+            <strong>Opportunity complete</strong>
+            <span>The downstream onboarding process now belongs to the Admin Team.</span>
+          </div>
+        </div>
+      </section>
+    );
+  }
   return (
     <section className="panel workflow-action-area">
       <div className="workflow-current">
@@ -1833,7 +2380,25 @@ function LeadWorkflowProgress({
   payment?: Record<string, unknown> | null;
   onSelect: (tab: string) => void;
 }) {
-  const currentIndex = workflowStateIndex(lead.state, payment);
+  const [handoffAcknowledged, setHandoffAcknowledged] = useState(false);
+  useEffect(() => {
+    if (lead.state !== "EndorsedToAdmin") {
+      setHandoffAcknowledged(false);
+      return;
+    }
+    api.leads
+      .endorsement(lead.id)
+      .then((value) => {
+        setHandoffAcknowledged(
+          String((value as Record<string, unknown>).status ?? "").toLowerCase() ===
+            "acknowledged",
+        );
+      })
+      .catch(() => setHandoffAcknowledged(false));
+  }, [lead.id, lead.state]);
+  const currentIndex = handoffAcknowledged
+    ? lifecycleSteps.length
+    : workflowStateIndex(lead.state, payment);
   const currentStage = lifecycleStageForLead(lead.state, payment);
   return (
     <section className="workflow-progress-panel">
@@ -1844,7 +2409,7 @@ function LeadWorkflowProgress({
             Move this opportunity through the franchise lifecycle.
           </strong>
         </div>
-        <span>{currentStage.label} now</span>
+        <span>{handoffAcknowledged ? "Complete" : `${currentStage.label} now`}</span>
       </div>
       <div className="workflow-stepper">
         {lifecycleSteps.map((step, index) => {
@@ -1874,21 +2439,31 @@ function LegacyLeadDetail() {
   const { leadId = "" } = useParams();
   const [lead, setLead] = useState<Lead | null>(null);
   const [activities, setActivities] = useState<ActivityItem[]>([]);
+  const [activityPage, setActivityPage] = useState(1);
+  const [activityTotal, setActivityTotal] = useState(0);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [tab, setTab] = useState("Overview");
   const [error, setError] = useState("");
   const [activityOpen, setActivityOpen] = useState(false);
   const [taskOpen, setTaskOpen] = useState(false);
   const [notice, setNotice] = useState<Notice | null>(null);
+  const loadActivities = async (page = 1) => {
+    const response = await api.leads.activities(leadId, page);
+    setActivities(response.items);
+    setActivityPage(response.page);
+    setActivityTotal(response.total);
+  };
   const load = async () => {
     try {
       const [nextLead, nextActivities, nextTasks] = await Promise.all([
         api.leads.get(leadId),
-        api.leads.activities(leadId),
+        api.leads.activities(leadId, 1),
         api.leads.tasks(leadId),
       ]);
       setLead(nextLead);
-      setActivities(nextActivities);
+      setActivities(nextActivities.items);
+      setActivityPage(nextActivities.page);
+      setActivityTotal(nextActivities.total);
       setTasks(nextTasks);
     } catch (e) {
       setError(errorMessage(e, "Unable to load this franchisee."));
@@ -2081,6 +2656,9 @@ function LegacyLeadDetail() {
           tab={tab}
           lead={lead}
           activities={activities}
+          activityPage={activityPage}
+          activityTotal={activityTotal}
+          onActivityPageChange={loadActivities}
           onReload={load}
           onNotice={setNotice}
           onAddActivity={() => setActivityOpen(true)}
@@ -2118,6 +2696,9 @@ function LeadTab({
   lead,
   payment,
   activities,
+  activityPage,
+  activityTotal,
+  onActivityPageChange,
   onReload,
   onNotice,
   onAddActivity,
@@ -2127,6 +2708,9 @@ function LeadTab({
   lead: Lead;
   payment?: Record<string, unknown> | null;
   activities: ActivityItem[];
+  activityPage: number;
+  activityTotal: number;
+  onActivityPageChange: (page: number) => Promise<void>;
   onReload: () => Promise<void>;
   onNotice: (notice: Notice) => void;
   onAddActivity: () => void;
@@ -2167,6 +2751,9 @@ function LeadTab({
     return (
       <ActivitiesPanel
         activities={activities}
+        page={activityPage}
+        total={activityTotal}
+        onPageChange={onActivityPageChange}
         onAddActivity={onAddActivity}
         onSelectTab={onSelectTab}
       />
@@ -2321,10 +2908,16 @@ function activityTimeLabel(value: string) {
 
 function ActivitiesPanel({
   activities,
+  page,
+  total,
+  onPageChange,
   onAddActivity,
   onSelectTab,
 }: {
   activities: ActivityItem[];
+  page: number;
+  total: number;
+  onPageChange: (page: number) => Promise<void>;
   onAddActivity: () => void;
   onSelectTab: (tab: string) => void;
 }) {
@@ -2333,6 +2926,18 @@ function ActivitiesPanel({
   const [dateFilter, setDateFilter] = useState<"all" | "today" | "earlier">(
     "all",
   );
+  const [pageBusy, setPageBusy] = useState(false);
+  const totalPages = Math.max(1, Math.ceil(total / 10));
+  const changePage = async (nextPage: number) => {
+    if (pageBusy || nextPage < 1 || nextPage > totalPages || nextPage === page)
+      return;
+    setPageBusy(true);
+    try {
+      await onPageChange(nextPage);
+    } finally {
+      setPageBusy(false);
+    }
+  };
   const today = new Date();
   const visible = activities.filter((activity) => {
     const presentation = activityPresentation(activity);
@@ -2465,7 +3070,55 @@ function ActivitiesPanel({
           }
         />
       )}
+      {totalPages > 1 && (
+        <PaginationControls
+          page={page}
+          totalPages={totalPages}
+          total={total}
+          busy={pageBusy}
+          onPageChange={changePage}
+        />
+      )}
     </section>
+  );
+}
+
+function PaginationControls({
+  page,
+  totalPages,
+  total,
+  busy,
+  onPageChange,
+}: {
+  page: number;
+  totalPages: number;
+  total: number;
+  busy?: boolean;
+  onPageChange: (page: number) => void | Promise<void>;
+}) {
+  return (
+    <div className="pagination-controls" aria-label="Pagination">
+      <span>
+        Showing {(page - 1) * 10 + 1}–{Math.min(page * 10, total)} of {total}
+      </span>
+      <div className="pagination-buttons">
+        <button
+          className="button button-secondary"
+          disabled={busy || page <= 1}
+          onClick={() => void onPageChange(page - 1)}
+        >
+          Previous
+        </button>
+        <span className="pagination-page">Page {page} of {totalPages}</span>
+        <button
+          className="button button-secondary"
+          disabled={busy || page >= totalPages}
+          onClick={() => void onPageChange(page + 1)}
+        >
+          Next
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -2484,8 +3137,23 @@ function WorkflowPanel({
   const preparationActive = currentStage.label === "Invoice & Documents";
   const financeActive = currentStage.label === "Finance verification";
   const contractActive = currentStage.label === "Contract";
+  const handoffActive = lead.state === "EndorsedToAdmin";
   const [contract, setContract] = useState<Contract | null>(null);
+  const [endorsement, setEndorsement] = useState<Record<string, unknown> | null>(null);
   const [documentsReadyForLead, setDocumentsReadyForLead] = useState<string | null>(null);
+  const handoffAcknowledged =
+    handoffActive &&
+    String(endorsement?.status ?? "").toLowerCase() === "acknowledged";
+  useEffect(() => {
+    if (!handoffActive) {
+      setEndorsement(null);
+      return;
+    }
+    api.leads
+      .endorsement(lead.id)
+      .then((value) => setEndorsement(value as Record<string, unknown>))
+      .catch(() => setEndorsement(null));
+  }, [handoffActive, lead.id]);
   const documentsComplete =
     Boolean(payment?.documentsComplete) || documentsReadyForLead === lead.id;
   const invoiceGenerated = ["Invoiced", "Confirmed"].includes(
@@ -2525,7 +3193,9 @@ function WorkflowPanel({
       active: financeActive,
     },
   ];
-  const currentTitle = preparationActive
+  const currentTitle = handoffAcknowledged
+    ? "Handoff complete"
+    : preparationActive
     ? !documentsComplete
       ? "Upload required documents"
       : !invoiceGenerated
@@ -2536,7 +3206,9 @@ function WorkflowPanel({
     : financeActive
       ? "Finance verification"
       : nextStepForLead(lead).label;
-  const currentDescription = preparationActive
+  const currentDescription = handoffAcknowledged
+    ? "The Admin Team acknowledged this handoff. The opportunity is complete and downstream onboarding can continue."
+    : preparationActive
     ? !documentsComplete
       ? "Upload the combined valid ID and three specimen signatures file before generating the invoice."
       : !invoiceGenerated
@@ -2547,7 +3219,15 @@ function WorkflowPanel({
     : financeActive
       ? "Finance verifies the invoice, payment evidence, and actual payment before contract drafting."
       : nextStepForLead(lead).detail;
-  const phaseSteps = preparationActive
+  const phaseSteps = handoffActive
+    ? [
+        {
+          label: handoffAcknowledged ? "Handoff complete" : "Acknowledge handoff",
+          complete: handoffAcknowledged,
+          active: !handoffAcknowledged,
+        },
+      ]
+    : preparationActive
     ? preparationSubsteps
     : financeActive
       ? financeSubsteps
@@ -2555,7 +3235,11 @@ function WorkflowPanel({
         ? []
         : [{ label: currentTitle, complete: false, active: true }];
   const compactPhase = phaseSteps.length <= 1;
-  const phaseOwner = preparationActive
+  const phaseOwner = handoffActive
+    ? handoffAcknowledged
+      ? "Completed"
+      : "Admin team owned"
+    : preparationActive
     ? "Agent-owned"
     : financeActive
       ? "Finance-owned"
@@ -2567,7 +3251,7 @@ function WorkflowPanel({
     : "Not configured";
   const invoiceNumber = String(payment?.invoiceNumber ?? "Not generated");
   const paymentStatus = String(
-    payment?.status ?? (lead.state === "Qualified" ? "Not generated" : "Pending"),
+    statusLabel(String(payment?.status ?? (lead.state === "Qualified" ? "NotGenerated" : "Pending"))),
   );
   const openInvoice = async () => {
     try {
@@ -2683,7 +3367,9 @@ function WorkflowPanel({
           <div className="workflow-phase-heading">
             <div>
               <span className="eyebrow">
-                {preparationActive
+                {handoffAcknowledged
+                  ? "WORKFLOW COMPLETE"
+                  : preparationActive
                   ? "INVOICE & DOCUMENTS"
                   : financeActive
                     ? "FINANCE VERIFICATION"
@@ -2694,7 +3380,9 @@ function WorkflowPanel({
                 {phaseOwner}
               </span>
             </div>
-            <span className="workflow-phase-status">Current phase</span>
+            <span className="workflow-phase-status">
+              {handoffAcknowledged ? "Completed" : "Current phase"}
+            </span>
           </div>
           {compactPhase ? (
             <div className="workflow-phase-description">
@@ -2733,12 +3421,18 @@ function WorkflowPanel({
         </div>
         <aside className="workflow-side-column">
           <section className="panel workflow-side-card">
-            <h3>{contractActive ? "Contract details" : "Step details"}</h3>
+            <h3>
+              {contractActive
+                ? "Contract details"
+                : handoffActive
+                  ? "Handoff details"
+                  : "Step details"}
+            </h3>
             {contractActive ? (
               <dl className="workflow-detail-list">
                 <div>
                   <dt>Contract status</dt>
-                  <dd>{contract?.status ?? "Not generated"}</dd>
+                  <dd>{contract ? statusLabel(contract.status) : "Not generated"}</dd>
                 </div>
                 <div>
                   <dt>Template</dt>
@@ -2759,6 +3453,25 @@ function WorkflowPanel({
                 <div>
                   <dt>Last updated</dt>
                   <dd>{contract?.updatedAt ? formatDate(contract.updatedAt) : "—"}</dd>
+                </div>
+              </dl>
+            ) : handoffActive ? (
+              <dl className="workflow-detail-list">
+                <div>
+                  <dt>Receiving team</dt>
+                  <dd>{String(endorsement?.receivingTeam ?? "Admin Team")}</dd>
+                </div>
+                <div>
+                  <dt>Status</dt>
+                  <dd>{statusLabel(String(endorsement?.status ?? "Pending"))}</dd>
+                </div>
+                <div>
+                  <dt>Handoff created</dt>
+                  <dd>{endorsement?.createdAt ? formatDate(String(endorsement.createdAt)) : "—"}</dd>
+                </div>
+                <div>
+                  <dt>Acknowledged</dt>
+                  <dd>{endorsement?.acknowledgedAt ? formatDate(String(endorsement.acknowledgedAt)) : "Awaiting Admin Team"}</dd>
                 </div>
               </dl>
             ) : (
@@ -2785,7 +3498,7 @@ function WorkflowPanel({
                 </div>
               </dl>
             )}
-            {!contractActive && payment?.status === "Invoiced" && !payment?.submittedForFinance && (
+            {!contractActive && !handoffActive && payment?.status === "Invoiced" && !payment?.submittedForFinance && (
               <div className="workflow-side-success">
                 <CheckCircle2 size={17} />
                 <span>Invoice generated successfully.</span>
@@ -2794,7 +3507,36 @@ function WorkflowPanel({
           </section>
           <section className="panel workflow-side-card">
             <h3>What happens next</h3>
-            {contractActive ? (
+            {handoffActive ? (
+              handoffAcknowledged ? (
+                <>
+                  <div className="completion-card workflow-completion-card">
+                    <CheckCircle2 size={19} />
+                    <div>
+                      <strong>Opportunity complete</strong>
+                      <span>
+                        The Admin Team acknowledged the handoff. No further
+                        action is required in the franchise workflow.
+                      </span>
+                    </div>
+                  </div>
+                  <div className="workflow-next-phase">
+                    <span>Lifecycle status</span>
+                    <strong className="workflow-next-phase-complete">Complete</strong>
+                  </div>
+                </>
+              ) : (
+                <div className="workflow-next-list">
+                  <div className="active">
+                    <span>1</span>
+                    <div>
+                      <strong>Admin Team acknowledgement</strong>
+                      <small>The receiving team must acknowledge this completed handoff.</small>
+                    </div>
+                  </div>
+                </div>
+              )
+            ) : contractActive ? (
               <>
                 <div className="workflow-next-list workflow-contract-next-list">
                   {[
@@ -2913,7 +3655,7 @@ function DownPaymentOverviewPanel({
   useEffect(() => {
     void reload();
   }, [lead.id]);
-  const status = String(payment?.status ?? "Not configured");
+  const status = String(payment?.status ?? "NotConfigured");
   const invoiced = status === "Invoiced";
   const confirmed = status === "Confirmed";
   const documentsComplete = Boolean(payment?.documentsComplete);
@@ -2942,7 +3684,7 @@ function DownPaymentOverviewPanel({
       </div>
       <div className="process-card">
         <div className="snapshot-grid">
-          <Info label="Status" value={loading ? "Loading…" : status} />
+          <Info label="Status" value={loading ? "Loading…" : statusLabel(status)} />
           <Info
             label="Amount"
             value={
@@ -3151,34 +3893,34 @@ function InvoiceOnlyPanel({
               </div>
             ) : (
               <>
-                <div className="invoice-document-checklist">
-                  <span className="eyebrow">DOCUMENT CHECKLIST</span>
-                  <div className={documentsComplete ? "complete" : ""}>
-                    <CheckCircle2 size={17} />
-                    <strong>Valid ID with 3 specimen signatures</strong>
+                <div className="finance-package-summary">
+                  <span className="eyebrow">PACKAGE READY</span>
+                  <div className="finance-package-item complete">
+                    <CheckCircle2 size={18} />
+                    <div><strong>Required document uploaded</strong><small>Valid ID with 3 specimen signatures</small></div>
+                  </div>
+                  <div className="finance-package-item complete">
+                    <CheckCircle2 size={18} />
+                    <div><strong>Invoice generated</strong><small>{String(payment?.invoiceNumber ?? "Down payment invoice")} · {String(payment?.currency ?? "PHP")} {Number(payment?.amount ?? 0).toLocaleString("en-PH", { minimumFractionDigits: 2 })}</small></div>
                   </div>
                 </div>
-                <div className="invoice-upload-label eyebrow">UPLOAD FILE (PDF ONLY)</div>
                 <DocumentsPanel
                   lead={lead}
                   onNotice={onNotice}
                   onDocumentsChanged={reload}
                   embedded
+                  fixedDocumentType="VALID_ID_SIGNATURES"
+                  visibleTypes={["VALID_ID_SIGNATURES", "VALID_ID", "SPECIMEN_SIGNATURE_1", "SPECIMEN_SIGNATURE_2", "SPECIMEN_SIGNATURE_3"]}
+                  hideUpload
+                  collapsible
+                  uploadedOnly
                 />
-                {!documentsComplete && (
-                  <div className="read-only-note">
-                    <ShieldCheck size={16} /> Upload the combined valid ID and
-                    three specimen signatures file before submitting to Finance.
-                  </div>
-                )}
-                <button
-                  className="button button-primary"
-                  onClick={submitToFinance}
-                  disabled={busy || !documentsComplete}
-                >
-                  {busy ? "Submitting…" : "Submit to Finance"}
-                  <ChevronRight size={16} />
-                </button>
+                <div className="button-row finance-submit-actions">
+                  <button className="button button-secondary" onClick={openInvoice}><FileText size={16} /> Open invoice</button>
+                  <button className="button button-primary" onClick={submitToFinance} disabled={busy || !documentsComplete}>
+                    {busy ? "Submitting…" : "Submit complete package to Finance"}<ChevronRight size={16} />
+                  </button>
+                </div>
               </>
             )}
           </div>
@@ -3421,7 +4163,7 @@ function FinanceConfirmationPanel({
                   ? "Payment verified"
                   : submitted
                     ? "Awaiting verification"
-                    : String(payment?.status ?? "Not started")
+                    : statusLabel(String(payment?.status ?? "NotStarted"))
             }
           />
           <Info
@@ -3678,10 +4420,8 @@ function InquiryPanel({
             ["age", "Age", true],
             ["contactNumber", "Contact number", true],
             ["email", "Email", true],
-            ["sourceOfIncome", "Source of income", true],
             ["preferredLocation", "Preferred location", false],
             ["address", "Address", false],
-            ["industry", "Industry", false],
             ["meetingDateTime", "Meeting date and time", false],
             ["questionsConcerns", "Questions or concerns", false],
           ] as [keyof typeof form, string, boolean][]
@@ -3714,6 +4454,20 @@ function InquiryPanel({
             ) : null}
           </label>
         ))}
+        <IndustryField
+          value={form.industry}
+          onChange={(industry) =>
+            setForm((current) => ({ ...current, industry }))
+          }
+        />
+        <SourceOfIncomeField
+          value={form.sourceOfIncome}
+          onChange={(sourceOfIncome) =>
+            setForm((current) => ({ ...current, sourceOfIncome }))
+          }
+          required
+          invalid={!form.sourceOfIncome.trim()}
+        />
         <div className="form-actions">
           <button className="button button-primary" disabled={loading}>
             {loading ? "Saving…" : "Save inquiry"}
@@ -3780,10 +4534,14 @@ function QualificationPanel({
     lead.actualPrice?.toString() ?? "",
   );
   const [callOutcome, setCallOutcome] = useState(lead.lastCallOutcome ?? "");
-  const [welcomeReceived, setWelcomeReceived] = useState(
-    lead.welcomeEmailReceived ?? "Unknown",
+  const [welcomeDelivery, setWelcomeDelivery] = useState({
+    status: lead.welcomeEmailStatus ?? "NotQueued",
+    queuedAt: lead.welcomeEmailQueuedAt,
+    sentAt: lead.welcomeEmailSentAt,
+  });
+  const [goodTime, setGoodTime] = useState(
+    normalizedDiscussionTime(lead.goodTimeToDiscuss),
   );
-  const [goodTime, setGoodTime] = useState(lead.goodTimeToDiscuss ?? "Unknown");
   const [nurturingSaved, setNurturingSaved] = useState(
     Boolean(lead.productLine && lead.lastCallOutcome),
   );
@@ -3798,7 +4556,9 @@ function QualificationPanel({
           productLine?: string;
           actualPrice?: number;
           lastCallOutcome?: string;
-          welcomeEmailReceived?: string;
+          welcomeEmailStatus?: string;
+          welcomeEmailQueuedAt?: string;
+          welcomeEmailSentAt?: string;
           goodTimeToDiscuss?: string;
         };
         setNotes(record.notes ?? "");
@@ -3808,11 +4568,15 @@ function QualificationPanel({
           record.actualPrice?.toString() ?? lead.actualPrice?.toString() ?? "",
         );
         setCallOutcome(record.lastCallOutcome ?? lead.lastCallOutcome ?? "");
-        setWelcomeReceived(
-          record.welcomeEmailReceived ?? lead.welcomeEmailReceived ?? "Unknown",
-        );
+        setWelcomeDelivery({
+          status: record.welcomeEmailStatus ?? lead.welcomeEmailStatus ?? "NotQueued",
+          queuedAt: record.welcomeEmailQueuedAt ?? lead.welcomeEmailQueuedAt,
+          sentAt: record.welcomeEmailSentAt ?? lead.welcomeEmailSentAt,
+        });
         setGoodTime(
-          record.goodTimeToDiscuss ?? lead.goodTimeToDiscuss ?? "Unknown",
+          normalizedDiscussionTime(
+            record.goodTimeToDiscuss ?? lead.goodTimeToDiscuss,
+          ),
         );
         setNurturingSaved(
           Boolean(
@@ -3834,7 +4598,6 @@ function QualificationPanel({
     const refreshed = await api.leads.get(lead.id);
     await api.leads.recordCallOutcome(lead.id, {
       outcome: callOutcome.trim(),
-      welcomeEmailReceived: welcomeReceived,
       goodTimeToDiscuss: goodTime,
       notes: notes.trim() || null,
       expectedVersion: refreshed.version,
@@ -3851,8 +4614,7 @@ function QualificationPanel({
     const missing = [
       !productLine ? "Product line" : null,
       !callOutcome.trim() ? "Call outcome" : null,
-      welcomeReceived === "Unknown" ? "Welcome email status" : null,
-      goodTime === "Unknown" ? "Good time to discuss" : null,
+      !goodTime ? "Preferred discussion time" : null,
     ].filter((item): item is string => Boolean(item));
     if (missing.length) {
       onNotice({
@@ -3884,8 +4646,7 @@ function QualificationPanel({
     const missing = [
       !productLine ? "Product line" : null,
       !callOutcome.trim() ? "Call outcome" : null,
-      welcomeReceived === "Unknown" ? "Welcome email status" : null,
-      goodTime === "Unknown" ? "Good time to discuss" : null,
+      !goodTime ? "Preferred discussion time" : null,
       !notes.trim() ? "Contact and assessment notes" : null,
     ].filter((item): item is string => Boolean(item));
     if (missing.length) {
@@ -3991,7 +4752,7 @@ function QualificationPanel({
       <div className="workflow-instructions">
         <strong>How to complete this step</strong>
         <span>
-          1. Record the call outcome and whether the welcome email was received.
+          1. Review the system-tracked welcome email delivery and record the call outcome.
         </span>
         <span>2. Select the franchise product and agreed price.</span>
         <span>
@@ -4001,8 +4762,7 @@ function QualificationPanel({
       {[
         !productLine ? "Product line" : null,
         !callOutcome.trim() ? "Call outcome" : null,
-        welcomeReceived === "Unknown" ? "Welcome email status" : null,
-        goodTime === "Unknown" ? "Good time to discuss" : null,
+        !goodTime ? "Preferred discussion time" : null,
       ].some(Boolean) ? (
         <div className="missing-fields-summary" role="status">
           <strong>Still needed</strong>
@@ -4010,8 +4770,7 @@ function QualificationPanel({
             {[
               !productLine ? "Product line" : null,
               !callOutcome.trim() ? "Call outcome" : null,
-              welcomeReceived === "Unknown" ? "Welcome email status" : null,
-              goodTime === "Unknown" ? "Good time to discuss" : null,
+              !goodTime ? "Preferred discussion time" : null,
             ]
               .filter(Boolean)
               .join(", ")}
@@ -4066,38 +4825,32 @@ function QualificationPanel({
               className={!callOutcome.trim() ? "field-missing" : undefined}
             />
           </label>
+          <div className={`system-status-field ${welcomeDelivery.status.toLowerCase()}`}>
+            <span>Welcome email</span>
+            <strong>{welcomeDelivery.status === "Sent" && welcomeDelivery.sentAt
+              ? `Sent ${formatDateTime(welcomeDelivery.sentAt)}`
+              : welcomeDelivery.status === "Pending" && welcomeDelivery.queuedAt
+                ? `Queued ${formatDateTime(welcomeDelivery.queuedAt)}`
+                : welcomeDelivery.status === "Processing" ? "Sending now"
+                  : welcomeDelivery.status === "Failed" ? "Delivery failed"
+                    : "Not queued"}</strong>
+            <small>Tracked automatically from the email service</small>
+          </div>
           <label>
-            Welcome email received?
-            <select
-              value={welcomeReceived}
-              onChange={(e) => {
-                setWelcomeReceived(e.target.value);
-                setNurturingSaved(false);
-              }}
-              aria-invalid={welcomeReceived === "Unknown"}
-              className={
-                welcomeReceived === "Unknown" ? "field-missing" : undefined
-              }
-            >
-              <option>Unknown</option>
-              <option>Yes</option>
-              <option>No</option>
-            </select>
-          </label>
-          <label>
-            Good time to discuss?
+            Preferred time to discuss
             <select
               value={goodTime}
               onChange={(e) => {
                 setGoodTime(e.target.value);
                 setNurturingSaved(false);
               }}
-              aria-invalid={goodTime === "Unknown"}
-              className={goodTime === "Unknown" ? "field-missing" : undefined}
+              aria-invalid={!goodTime}
+              className={!goodTime ? "field-missing" : undefined}
             >
-              <option>Unknown</option>
-              <option>Yes</option>
-              <option>No</option>
+              <option value="">Select a preferred time</option>
+              {discussionTimeOptions.map((option) => (
+                <option key={option}>{option}</option>
+              ))}
             </select>
           </label>
         </div>
@@ -4169,371 +4922,158 @@ function LocationAnalysisPanel({
   onReload: () => Promise<void>;
   onNotice: (notice: Notice) => void;
 }) {
-  const [analysis, setAnalysis] = useState<{
-    preferredLocation: string;
-    status: string;
-    notes?: string;
-    updatedAt?: string;
-  } | null>(null);
-  const [preferredLocation, setPreferredLocation] = useState(
-    lead.preferredLocation ?? "",
-  );
+  const [analysis, setAnalysis] = useState<LocationAnalysisResponse | null>(null);
+  const [preferredLocation, setPreferredLocation] = useState(lead.preferredLocation ?? "");
+  const [leaseOwnershipStatus, setLeaseOwnershipStatus] = useState("");
+  const [answers, setAnswers] = useState<Record<string, LocationAnalysisAnswer>>({});
   const [notes, setNotes] = useState("");
-  const [decision, setDecision] = useState<LocationDecision>("Pending");
+  const [reviewNotes, setReviewNotes] = useState("");
+  const [activeGroup, setActiveGroup] = useState(locationAnalysisGroups[0]);
   const [busy, setBusy] = useState(false);
-  const canEdit = hasRole(session.user?.role, leadWriteRoles);
+  const canEdit = hasRole(session.user?.role, marketingWriteRoles);
+  const canReview = session.user?.role === "GeneralManager";
 
   useEffect(() => {
-    api.leads
-      .location(lead.id)
-      .then((value) => {
-        const item = value as {
-          preferredLocation: string;
-          status: string;
-          notes?: string;
-          updatedAt?: string;
-        };
-        setAnalysis(item);
-        setPreferredLocation(item.preferredLocation);
-        setNotes(item.notes ?? "");
-        setDecision(normaliseLocationDecision(item.status));
-      })
-      .catch(() => {
-        setAnalysis(null);
-        setPreferredLocation(lead.preferredLocation ?? "");
-        setNotes("");
-        setDecision("Pending");
-      });
+    api.leads.location(lead.id).then((value) => {
+      setAnalysis(value);
+      setPreferredLocation(value.preferredLocation || lead.preferredLocation || "");
+      setLeaseOwnershipStatus(value.leaseOwnershipStatus || "");
+      setNotes(value.notes ?? "");
+      setReviewNotes(value.reviewNotes ?? value.revisionReason ?? "");
+      setAnswers(Object.fromEntries(value.answers.map((answer) => [answer.questionCode, answer])));
+    }).catch(() => {
+      setAnalysis(null);
+      setPreferredLocation(lead.preferredLocation ?? "");
+      setLeaseOwnershipStatus("");
+      setNotes("");
+      setReviewNotes("");
+      setAnswers({});
+    });
   }, [lead.id, lead.preferredLocation]);
+
+  const status = analysis?.status ?? "Draft";
+  const questionCount = analysis?.questionCount || locationAnalysisQuestions.length;
+  const answeredCount = Object.keys(answers).length;
+  const completion = Math.round((answeredCount / questionCount) * 100);
+  const answerList = Object.values(answers);
+  const isReadOnly = status === "Submitted" || status === "Approved" || !canEdit;
+  const isReturned = status === "Returned";
+
+  const saveDraft = async () => {
+    if (!preferredLocation.trim()) throw new Error("Add the preferred location in Inquiry before saving this assessment.");
+    const value = await api.leads.updateLocation(lead.id, {
+      preferredLocation: preferredLocation.trim(),
+      leaseOwnershipStatus: leaseOwnershipStatus || null,
+      answers: answerList,
+      notes: notes.trim() || null,
+      expectedVersion: lead.version,
+    });
+    setAnalysis(value);
+    setReviewNotes(value.reviewNotes ?? value.revisionReason ?? "");
+    return value;
+  };
 
   const saveAssessment = async (event: FormEvent) => {
     event.preventDefault();
-    if (!preferredLocation.trim() || !notes.trim()) {
-      onNotice({
-        message:
-          "Add assessment notes before saving the location recommendation.",
-        tone: "error",
-      });
+    setBusy(true);
+    try {
+      await saveDraft();
+      await onReload();
+      onNotice({ message: "Location analysis draft saved.", tone: "success" });
+    } catch (e) {
+      onNotice({ message: errorMessage(e, "Unable to save the location analysis."), tone: "error" });
+    } finally { setBusy(false); }
+  };
+
+  const submitForReview = async () => {
+    if (answeredCount !== questionCount) {
+      onNotice({ message: `Answer all ${questionCount} criteria before submitting.`, tone: "error" });
+      return;
+    }
+    if (!leaseOwnershipStatus) {
+      onNotice({ message: "Select the lease or ownership status before submitting.", tone: "error" });
       return;
     }
     setBusy(true);
     try {
-      await api.leads.updateLocation(lead.id, {
-        preferredLocation: preferredLocation.trim(),
-        notes: notes.trim(),
-        expectedVersion: lead.version,
-      });
-      const refreshedLead = await api.leads.get(lead.id);
-      const value = await api.leads.evaluateLocation(lead.id, {
-        decision,
-        notes: notes.trim(),
-        expectedVersion: refreshedLead.version,
-      });
-      setAnalysis((current) => ({
-        ...(current ?? { preferredLocation: preferredLocation.trim() }),
-        preferredLocation: preferredLocation.trim(),
-        ...(value as object),
-        status: decision,
-      }));
+      await saveDraft();
+      const value = await api.leads.submitLocation(lead.id, { expectedVersion: lead.version });
+      setAnalysis(value);
       await onReload();
-      onNotice({
-        message:
-          decision === "Passed"
-            ? "Location recommendation approved and saved."
-            : decision === "Failed"
-              ? "Location recommendation rejected and saved."
-              : "Assessment saved. The conditional analysis remains under review.",
-        tone: "success",
-      });
+      onNotice({ message: "Location analysis submitted for General Manager review.", tone: "success" });
     } catch (e) {
-      const message = errorMessage(
-        e,
-        "Unable to save the location assessment.",
-      );
-      onNotice({
-        message: message.toLowerCase().includes("refresh")
-          ? "This lead changed elsewhere. Refresh the record and try saving again."
-          : message,
-        tone: "error",
-      });
-    } finally {
-      setBusy(false);
-    }
+      onNotice({ message: errorMessage(e, "Unable to submit the location analysis."), tone: "error" });
+    } finally { setBusy(false); }
   };
 
-  const hasAssessment = notes.trim().length >= 10;
-  const status = normaliseLocationDecision(analysis?.status);
-  const decisionLabel =
-    decision === "Passed"
-      ? "Approve location"
-      : decision === "Failed"
-        ? "Save rejection"
-        : "Save assessment";
-  const decisionMessage =
-    decision === "Passed"
-      ? "The recommendation will be recorded without changing the pipeline stage."
-      : decision === "Failed"
-        ? "The rejected recommendation will be retained for the team to address."
-        : "This conditional assessment remains open for more information.";
+  const review = async (decision: "Approved" | "Returned") => {
+    if (decision === "Returned" && !reviewNotes.trim()) {
+      onNotice({ message: "Add a reason when returning the analysis for revision.", tone: "error" });
+      return;
+    }
+    setBusy(true);
+    try {
+      await api.leads.evaluateLocation(lead.id, { decision, notes: reviewNotes.trim() || null, expectedVersion: lead.version });
+      const value = await api.leads.location(lead.id);
+      setAnalysis(value);
+      await onReload();
+      onNotice({ message: decision === "Approved" ? "Location analysis approved." : "Location analysis returned for revision.", tone: "success" });
+    } catch (e) {
+      onNotice({ message: errorMessage(e, "Unable to complete the location analysis review."), tone: "error" });
+    } finally { setBusy(false); }
+  };
+
+  const responseCounts = ["YES_COMPLETELY", "YES_PARTIALLY", "NO", "DONT_KNOW"].map((code) => ({ code, count: answerList.filter((answer) => answer.response === code).length }));
+  const attention = answerList.filter((answer) => answer.response === "NO" || answer.response === "YES_PARTIALLY");
+  const nextGroup = locationAnalysisGroups.find((group) => locationAnalysisQuestions.filter((question) => question.group === group).some((question) => !answers[question.code]));
 
   return (
-    <section className="location-workspace">
-      <div className="location-main panel">
-        <div className="location-heading">
-          <div>
-            <span className="eyebrow">CURRENT WORKFLOW STEP</span>
-            <h2>Location analysis</h2>
-            <p>
-              Assess the proposed site and make a recommendation for the next
-              team.
-            </p>
-          </div>
-          <span className={`location-status-badge ${status.toLowerCase()}`}>
-            <i />
-            {status === "Passed"
-              ? "Approved"
-              : status === "Failed"
-                ? "Rejected"
-                : "In progress"}
-          </span>
-        </div>
-        <div className="location-checklist">
-          <div className="location-checklist-item complete">
-            <span>✓</span>
-            <div>
-              <strong>Confirm proposed location</strong>
-              <small>{preferredLocation || "Location not provided"}</small>
-            </div>
-          </div>
-          <div
-            className={`location-checklist-item ${hasAssessment ? "complete" : "current"}`}
-          >
-            <span>{hasAssessment ? "✓" : "2"}</span>
-            <div>
-              <strong>Record assessment</strong>
-              <small>
-                {hasAssessment
-                  ? "Findings and recommendation added."
-                  : "Add findings, risks, and recommendation below."}
-              </small>
-            </div>
-          </div>
-          <div
-            className={`location-checklist-item ${analysis?.status && status !== "Pending" ? "complete" : "current"}`}
-          >
-            <span>{analysis?.status && status !== "Pending" ? "✓" : "3"}</span>
-            <div>
-              <strong>Make decision</strong>
-              <small>
-                {analysis?.status && status !== "Pending"
-                  ? "Decision recorded."
-                  : hasAssessment
-                    ? "Choose a recommendation below."
-                    : "Available after assessment details are saved."}
-              </small>
-            </div>
-          </div>
-        </div>
-        <form className="location-assessment-form" onSubmit={saveAssessment}>
-          <div className="location-field-block">
-            <label htmlFor="proposed-location">Proposed location</label>
-            <div className="location-value-field">
-              <input
-                id="proposed-location"
-                required
-                minLength={2}
-                maxLength={240}
-                value={preferredLocation}
-                onChange={(e) => setPreferredLocation(e.target.value)}
-                placeholder="City, branch, or proposed site"
-                disabled={!canEdit}
-              />
-              <button
-                type="button"
-                onClick={() =>
-                  document.getElementById("proposed-location")?.focus()
-                }
-                disabled={!canEdit}
-              >
-                Change
-              </button>
-            </div>
-          </div>
-          <label className="location-field-block" htmlFor="assessment-notes">
-            <span>Assessment notes</span>
-            <textarea
-              id="assessment-notes"
-              required
-              minLength={10}
-              maxLength={2000}
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              placeholder="Record site findings, risks, demographics, accessibility, competition, and your recommendation."
-              disabled={!canEdit}
-            />
-            <small>{notes.length}/2000 characters</small>
-          </label>
-          <div className="recommendation-block">
-            <div className="recommendation-heading">
-              <div>
-                <span className="eyebrow">LOCATION RECOMMENDATION</span>
-                <h3>What is your recommendation for this location?</h3>
-              </div>
-              <span className="decision-status">
-                {status === "Passed"
-                  ? "Approved"
-                  : status === "Failed"
-                    ? "Rejected"
-                    : "Pending review"}
-              </span>
-            </div>
-            <div
-              className="decision-options"
-              role="radiogroup"
-              aria-label="Location recommendation"
-            >
-              <button
-                type="button"
-                className={`decision-option ${decision === "Passed" ? "selected passed" : ""}`}
-                onClick={() => setDecision("Passed")}
-                aria-pressed={decision === "Passed"}
-                disabled={!canEdit || !hasAssessment}
-              >
-                <span className="decision-option-icon">
-                  <CheckCircle2 size={17} />
-                </span>
-                <span>
-                  <strong>Approve location</strong>
-                  <small>
-                    Suitable recommendation recorded for the opportunity.
-                  </small>
-                </span>
-              </button>
-              <button
-                type="button"
-                className={`decision-option ${decision === "Pending" ? "selected pending" : ""}`}
-                onClick={() => setDecision("Pending")}
-                aria-pressed={decision === "Pending"}
-                disabled={!canEdit || !hasAssessment}
-              >
-                <span className="decision-option-icon">
-                  <Clock3 size={17} />
-                </span>
-                <span>
-                  <strong>Needs additional review</strong>
-                  <small>
-                    Keep this opportunity here while more information is
-                    gathered.
-                  </small>
-                </span>
-              </button>
-              <button
-                type="button"
-                className={`decision-option ${decision === "Failed" ? "selected failed" : ""}`}
-                onClick={() => setDecision("Failed")}
-                aria-pressed={decision === "Failed"}
-                disabled={!canEdit || !hasAssessment}
-              >
-                <span className="decision-option-icon">
-                  <X size={17} />
-                </span>
-                <span>
-                  <strong>Reject location</strong>
-                  <small>
-                    A new location is needed before the opportunity can
-                    progress.
-                  </small>
-                </span>
-              </button>
-            </div>
-            <p className="decision-explanation">{decisionMessage}</p>
-          </div>
-          {canEdit ? <div className="location-form-footer">
-            <span className={hasAssessment ? "save-state ready" : "save-state"}>
-              {hasAssessment
-                ? "✓ Ready to save assessment"
-                : "Add assessment notes to continue"}
-            </span>
-            <div className="button-row">
-              <button
-                type="button"
-                className="button button-secondary"
-                onClick={() => {
-                  setPreferredLocation(
-                    analysis?.preferredLocation ?? lead.preferredLocation ?? "",
-                  );
-                  setNotes(analysis?.notes ?? "");
-                  setDecision(normaliseLocationDecision(analysis?.status));
-                }}
-              >
-                Discard changes
-              </button>
-              <button
-                type="submit"
-                className="button button-primary"
-                disabled={busy || !preferredLocation.trim() || !hasAssessment}
-              >
-                {busy ? "Saving…" : decisionLabel}
-                <ChevronRight size={16} />
-              </button>
-            </div>
-          </div> : (
-            <div className="read-only-note">
-              <ShieldCheck size={16} /> Location analysis is view-only for your role.
-            </div>
-          )}
-        </form>
-      </div>
-      <aside className="location-context panel">
-        <div className="location-context-heading">
+    <section className="location-analysis-shell">
+      <div className="location-analysis-main">
+        <div className="location-analysis-header">
           <div>
             <span className="eyebrow">LOCATION ANALYSIS</span>
-            <h3>Progress</h3>
+            <h2>Evaluate the proposed franchise location</h2>
+            <p>{lead.fullName} · {preferredLocation || "Location not provided"}</p>
           </div>
-          <span className={`location-status-badge ${status.toLowerCase()}`}>
-            <i />
-            {status === "Passed" ? "Complete" : "Required to complete"}
-          </span>
+          <span className={`location-analysis-status ${status.toLowerCase()}`}>{status === "Returned" ? "Changes requested" : status}</span>
         </div>
-        <div className="context-list">
-          <div>
-            <span className="context-check complete">✓</span>
-            <span>Candidate qualified</span>
+        <div className="location-analysis-progress"><div><strong>{answeredCount} / {questionCount} answered</strong><span>{completion}% complete</span></div><div className="progress-track"><i style={{ width: `${completion}%` }} /></div></div>
+        {!lead.preferredLocation && !analysis && <div className="location-analysis-callout"><AlertTriangle size={17} /> Add the proposed location in the Inquiry tab first, then return here to complete this assessment.</div>}
+        <form onSubmit={saveAssessment}>
+          <div className="location-analysis-meta">
+            <label>Exact address / proposed location<input value={preferredLocation} onChange={(e) => setPreferredLocation(e.target.value)} maxLength={240} disabled={isReadOnly} placeholder="Street, barangay, city, province" /></label>
+            <label>Candidate<input value={analysis?.candidateName ?? lead.fullName} readOnly /></label>
+            <label>Lease / ownership<select value={leaseOwnershipStatus} onChange={(e) => setLeaseOwnershipStatus(e.target.value)} disabled={isReadOnly}><option value="">Select status</option>{leaseOwnershipOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
           </div>
-          <div>
-            <span className="context-check complete">✓</span>
-            <span>Proposed location provided</span>
+          {isReturned && <div className="location-analysis-review returned"><strong>Changes requested by General Manager</strong><p>{analysis?.revisionReason || "Review the feedback below and resubmit when ready."}</p></div>}
+          <div className="location-analysis-groups">
+            {locationAnalysisGroups.map((group) => {
+              const groupQuestions = locationAnalysisQuestions.filter((question) => question.group === group);
+              const groupAnswered = groupQuestions.filter((question) => answers[question.code]).length;
+              return <details key={group} className="location-analysis-group" open={activeGroup === group} onToggle={(event) => { if ((event.currentTarget as HTMLDetailsElement).open) setActiveGroup(group); }}>
+                <summary><span><strong>{group}</strong><small>{groupAnswered} of {groupQuestions.length} answered</small></span><ChevronDown size={17} /></summary>
+                <div className="location-analysis-question-list">
+                  {groupQuestions.map((question, index) => {
+                    const answer = answers[question.code];
+                    return <fieldset className="location-question" key={question.code}><legend><span>{index + 1}. {question.prompt}</span>{question.hint && <small>{question.hint}</small>}</legend><div className="location-question-options">{Object.entries(locationAnalysisResponseLabels).map(([code, label]) => <label key={code} className={answer?.response === code ? "selected" : ""}><input type="radio" name={question.code} value={code} checked={answer?.response === code} onChange={() => setAnswers((current) => ({ ...current, [question.code]: { questionCode: question.code, response: code as LocationAnalysisAnswer["response"], remark: current[question.code]?.remark ?? null } }))} disabled={isReadOnly} />{label}</label>)}</div><label className="location-question-remark">Remark (optional)<textarea value={answer?.remark ?? ""} onChange={(e) => setAnswers((current) => { const existing = current[question.code]; return existing ? { ...current, [question.code]: { ...existing, remark: e.target.value } } : current; })} disabled={isReadOnly} maxLength={1000} placeholder="Add evidence, context, or a follow-up note" /></label></fieldset>;
+                  })}
+                </div>
+              </details>;
+            })}
           </div>
-          <div>
-            <span
-              className={`context-check ${hasAssessment ? "complete" : ""}`}
-            >
-              {hasAssessment ? "✓" : "○"}
-            </span>
-            <span>Assessment recorded</span>
-          </div>
-          <div>
-            <span
-              className={`context-check ${status !== "Pending" ? "complete" : ""}`}
-            >
-              {status !== "Pending" ? "✓" : "○"}
-            </span>
-            <span>Decision recorded</span>
-          </div>
-        </div>
-        <div className="context-divider" />
-        <div className="context-fact">
-          <span>Current owner</span>
-          <strong>Assigned agent · {lead.assignedAgentName ?? "Unknown agent"}</strong>
-        </div>
-        <div className="context-fact">
-          <span>Pipeline impact</span>
-          <strong>No automatic stage change</strong>
-        </div>
-        <div className="context-next">
-          <span className="eyebrow">WHEN YOU FINISH</span>
-          <p>{decisionMessage}</p>
-        </div>
+          <label className="location-analysis-notes">Overall assessment notes<textarea value={notes} onChange={(e) => setNotes(e.target.value)} maxLength={2000} disabled={isReadOnly} placeholder="Summarize important findings and risks." /></label>
+          <p className="location-analysis-supporting"><FileText size={15} /> Add supporting photos or documents from the Documents tab.</p>
+          {canEdit && !isReadOnly && <div className="location-analysis-actions"><button type="submit" className="button button-secondary" disabled={busy}>{busy ? "Saving…" : "Save draft"}</button><button type="button" className="button button-primary" disabled={busy || answeredCount !== questionCount || !leaseOwnershipStatus} onClick={submitForReview}><Send size={15} /> Submit for GM review</button></div>}
+          {canReview && status === "Submitted" && <div className="location-analysis-review"><span className="eyebrow">GENERAL MANAGER REVIEW</span><h3>Review the completed assessment</h3><textarea value={reviewNotes} onChange={(e) => setReviewNotes(e.target.value)} maxLength={2000} placeholder="Add approval notes or explain what needs revision." /><div className="location-analysis-actions"><button type="button" className="button button-secondary" disabled={busy} onClick={() => review("Returned")}>Return for revision</button><button type="button" className="button button-primary" disabled={busy} onClick={() => review("Approved")}><CheckCircle2 size={15} /> Approve analysis</button></div></div>}
+          {status === "Approved" && <div className="location-analysis-finished"><CheckCircle2 size={17} /><div><strong>Location analysis approved</strong><p>{analysis?.evaluatedByName ? `Approved by ${analysis.evaluatedByName}.` : "The assessment is complete and read-only."}</p></div></div>}
+          {!canEdit && !canReview && <div className="read-only-note"><ShieldCheck size={16} /> Location analysis is view-only for your role.</div>}
+        </form>
+      </div>
+      <aside className="location-analysis-sidebar">
+        <div className="location-analysis-summary"><span className="eyebrow">ASSESSMENT SUMMARY</span><strong>{completion}% complete</strong><p>{answeredCount} of {questionCount} criteria answered</p><div className="location-response-counts">{responseCounts.map((item) => <div key={item.code}><span className={`response-dot ${item.code.toLowerCase()}`} />{locationAnalysisResponseLabels[item.code]}<strong>{item.count}</strong></div>)}<div><span className="response-dot unanswered" />Unanswered<strong>{questionCount - answeredCount}</strong></div></div></div>
+        {attention.length > 0 && <div className="location-analysis-attention"><span className="eyebrow">ITEMS REQUIRING ATTENTION</span>{attention.slice(0, 4).map((answer) => <div key={answer.questionCode}><AlertTriangle size={14} /><span>{locationAnalysisQuestions.find((question) => question.code === answer.questionCode)?.prompt}</span></div>)}</div>}
+        <div className="location-analysis-next"><span className="eyebrow">NEXT</span><strong>{status === "Submitted" ? "Awaiting General Manager review" : status === "Approved" ? "Assessment complete" : nextGroup ? `Complete ${nextGroup}` : "Ready to submit"}</strong><p>{status === "Returned" ? "Update the requested items and submit again." : "Responses are saved as a draft until submitted."}</p></div>
       </aside>
     </section>
   );
@@ -4549,8 +5089,11 @@ function DocumentsPanel({
   hideUpload = false,
   collapsible = false,
   uploadedOnly = false,
+  compactAfterUpload = false,
+  documentCard = false,
+  hideEmptyState = false,
 }: {
-  lead: Lead;
+  lead: Pick<Lead, "id">;
   onNotice: (notice: Notice) => void;
   onDocumentsChanged?: () => Promise<void>;
   embedded?: boolean;
@@ -4559,6 +5102,9 @@ function DocumentsPanel({
   hideUpload?: boolean;
   collapsible?: boolean;
   uploadedOnly?: boolean;
+  compactAfterUpload?: boolean;
+  documentCard?: boolean;
+  hideEmptyState?: boolean;
 }) {
   const [documents, setDocuments] = useState<DocumentItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -4567,6 +5113,7 @@ function DocumentsPanel({
     fixedDocumentType ?? "VALID_ID_SIGNATURES",
   );
   const [busy, setBusy] = useState(false);
+  const [replaceMode, setReplaceMode] = useState(false);
   const canUpload =
     fixedDocumentType === "PAYMENT_RECEIPT"
       ? session.user?.role === "Finance"
@@ -4586,8 +5133,12 @@ function DocumentsPanel({
   const typeFilteredDocuments = visibleTypes?.length
     ? documents.filter((item) => visibleTypes.includes(item.documentType))
     : documents;
-  const displayedDocuments = uploadedOnly
-    ? typeFilteredDocuments.filter((item) => item.status === "Uploaded")
+  const uploadedDocuments = typeFilteredDocuments.filter(
+    (item) => item.status === "Uploaded",
+  );
+  const compactMode = compactAfterUpload && uploadedDocuments.length > 0 && !replaceMode;
+  const displayedDocuments = uploadedOnly || compactMode
+    ? uploadedDocuments
     : typeFilteredDocuments;
   const reload = () =>
     api.leads
@@ -4636,7 +5187,11 @@ function DocumentsPanel({
         objectKey: intent.objectKey,
         sha256: hash,
       });
+      if (replaceMode) {
+        await Promise.all(uploadedDocuments.map((item) => api.leads.archiveDocument(lead.id, item.id)));
+      }
       setFile(null);
+      setReplaceMode(false);
       onNotice({ message: "Document uploaded securely.", tone: "success" });
       await reload();
       await onDocumentsChanged?.();
@@ -4664,7 +5219,7 @@ function DocumentsPanel({
   };
   const content = (
     <>
-      {canUpload && !hideUpload ? (
+      {canUpload && !hideUpload && !compactMode ? (
         <form className="document-upload" onSubmit={upload}>
           {!embedded && !fixedDocumentType && (
             <select
@@ -4715,7 +5270,7 @@ function DocumentsPanel({
             {busy ? "Uploading…" : embedded ? "Upload file" : "Upload private file"}
           </button>
         </form>
-      ) : !hideUpload ? (
+      ) : !hideUpload && !compactMode ? (
         <div className="read-only-note">
           <ShieldCheck size={16} /> Documents are view-only for your role.
         </div>
@@ -4723,7 +5278,25 @@ function DocumentsPanel({
       {loading ? (
         <Loading />
       ) : displayedDocuments.length ? (
-        collapsible ? (
+        documentCard && uploadedDocuments.length > 0 && !replaceMode ? (
+          <div className="contract-uploaded-files">
+            {uploadedDocuments.map((item) => (
+              <div className="contract-uploaded-file" key={item.id}>
+                <div className="contract-uploaded-file-main">
+                  <div className="document-icon"><FileText size={17} /></div>
+                  <div>
+                    <strong>{item.fileName}</strong>
+                    <span>Uploaded {formatDate(item.createdAt)}</span>
+                  </div>
+                </div>
+                <div className="contract-uploaded-file-actions">
+                  <button type="button" className="text-link" onClick={() => download(item)}>View <ArrowUpRight size={13} /></button>
+                  {canUpload && !hideUpload && <button type="button" className="text-link muted-link" onClick={() => setReplaceMode(true)}>Replace</button>}
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : collapsible || compactMode ? (
           <details className="document-disclosure">
             <summary>
               <span><FileText size={16} /> Uploaded documents</span>
@@ -4751,16 +5324,16 @@ function DocumentsPanel({
                 <div className="document-icon"><FileText size={17} /></div>
                 <div>
                   <strong>{item.fileName}</strong>
-                  <span>{documentTypeLabel(item.documentType)} · {Math.ceil(item.sizeBytes / 1024)} KB · {item.status}</span>
+                  <span>{documentTypeLabel(item.documentType)} · {Math.ceil(item.sizeBytes / 1024)} KB · {statusLabel(item.status)}</span>
                 </div>
                 <button className="text-link" onClick={() => download(item)}>
-                  Open <ArrowUpRight size={14} />
+                  View <ArrowUpRight size={14} />
                 </button>
               </div>
             ))}
           </div>
         )
-      ) : (
+      ) : hideEmptyState ? null : (
         <EmptyState
           icon={FileText}
           title={
@@ -4768,17 +5341,21 @@ function DocumentsPanel({
               ? "No payment evidence attached"
               : fixedDocumentType === "FLOOR_PLAN"
                 ? "No floor plan uploaded"
-                : fixedDocumentType === "PERSPECTIVE"
-                  ? "No perspective uploaded"
-                  : "No documents yet"
+              : fixedDocumentType === "PERSPECTIVE"
+                ? "No perspective uploaded"
+                : fixedDocumentType
+                  ? `No ${documentTypeLabel(fixedDocumentType)} uploaded`
+                : "No documents yet"
           }
           text={
             fixedDocumentType === "PAYMENT_RECEIPT"
               ? "Finance can attach a receipt screenshot, bank confirmation, or PDF for this verification."
               : fixedDocumentType === "FLOOR_PLAN"
                 ? "Upload the floor plan required before the contract is submitted for GM review."
-                : fixedDocumentType === "PERSPECTIVE"
-                  ? "Upload the site perspective required before the contract is submitted for GM review."
+              : fixedDocumentType === "PERSPECTIVE"
+                ? "Upload the site perspective required before the contract is submitted for GM review."
+                : fixedDocumentType
+                  ? `Upload the ${documentTypeLabel(fixedDocumentType)} required for this pre-launch requirement.`
                   : "Upload one scanned file containing the valid ID and three specimen signatures before Finance confirms payment."
           }
         />
@@ -4872,7 +5449,7 @@ function FinancePanel({
         <div className="snapshot-grid">
           <Info
             label="Status"
-            value={String(payment?.status ?? "Not started")}
+            value={statusLabel(String(payment?.status ?? "NotStarted"))}
           />
           <Info
             label="Amount"
@@ -4954,7 +5531,9 @@ function ContractPanel({
     complete: boolean;
   };
   const [contract, setContract] = useState<Contract | null>(null);
+  const [contractDocuments, setContractDocuments] = useState<DocumentItem[]>([]);
   const [checklist, setChecklist] = useState<ReviewChecklist | null>(null);
+  const [checklistDirty, setChecklistDirty] = useState(false);
   const [template, setTemplate] = useState("STANDARD_FRANCHISE");
   const [notes, setNotes] = useState("");
   const [franchiseeName, setFranchiseeName] = useState("");
@@ -4962,6 +5541,7 @@ function ContractPanel({
   const [franchiseeEmail, setFranchiseeEmail] = useState(lead.email);
   const [drCareEmail, setDrCareEmail] = useState(session.user?.email ?? "");
   const [signingRequests, setSigningRequests] = useState<SigningRequest[]>([]);
+  const [signingLinks, setSigningLinks] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const canDraft = session.user?.role === "MarketingAdmin";
   const canReview = session.user?.role === "GeneralManager";
@@ -4972,6 +5552,8 @@ function ContractPanel({
       contract.status === "Draft" ||
       contract.status === "RevisionRequested");
   const canChecklist = canReview && contract?.status === "InReview";
+  const reviewFinished =
+    canReview && Boolean(contract && ["Approved", "Signed"].includes(contract.status));
   const reload = async () => {
     try {
       const next = await api.leads.contract(lead.id);
@@ -4980,11 +5562,21 @@ function ContractPanel({
       onContractChange?.(next);
       const nextChecklist = await api.leads.contractChecklist(lead.id);
       setChecklist(nextChecklist as ReviewChecklist);
-      setSigningRequests(await api.leads.signingRequests(lead.id));
+      setChecklistDirty(false);
+      const nextDocuments = await api.leads.documents(lead.id);
+      setContractDocuments(nextDocuments);
+      const requests = await api.leads.signingRequests(lead.id);
+      setSigningRequests(requests);
+      const active = requests.filter((item) => ["Pending", "Viewed"].includes(item.status));
+      const franchisee = active.find((item) => item.signerRole === "franchisee");
+      const drCare = active.find((item) => item.signerRole === "dr-care");
+      if (franchisee) { setFranchiseeName((value) => value || franchisee.signerName); setFranchiseeEmail((value) => value || franchisee.signerEmail); }
+      if (drCare) { setDrCareName((value) => value || drCare.signerName); setDrCareEmail((value) => value || drCare.signerEmail); }
     } catch {
       setContract(null);
       onContractChange?.(null);
       setChecklist(null);
+      setContractDocuments([]);
     }
   };
   useEffect(() => {
@@ -5019,7 +5611,8 @@ function ContractPanel({
       "Review checklist saved.",
     );
   };
-  const toggleChecklist = (itemId: string) =>
+  const toggleChecklist = (itemId: string) => {
+    setChecklistDirty(true);
     setChecklist((current) => {
       if (!current) return current;
       const items = current.items.map((item) =>
@@ -5033,6 +5626,22 @@ function ContractPanel({
           .every((item) => item.complete),
       };
     });
+  };
+  const approveContract = () => {
+    if (!checklist?.complete) return;
+    return run(async () => {
+      await api.leads.updateContractChecklist(lead.id, {
+        leadId: lead.id,
+        items: checklist.items,
+        complete: checklist.complete,
+        expectedVersion: lead.version,
+      });
+      await api.leads.approveContract(lead.id, {
+        notes: notes || "Approved",
+        expectedVersion: lead.version,
+      });
+    }, "Checklist saved and contract approved.");
+  };
   const requestSignature = (
     role: "franchisee" | "dr-care",
     signerName: string,
@@ -5045,6 +5654,10 @@ function ContractPanel({
       });
       return;
     }
+    if (signerEmail.trim().toLowerCase().endsWith(".local")) {
+      onNotice({ message: "Use a real inbox for electronic signing. Development .local addresses cannot receive the secure email.", tone: "error" });
+      return;
+    }
     return run(async () => {
       const created = await api.leads.createSigningRequest(lead.id, {
         signerRole: role,
@@ -5052,11 +5665,17 @@ function ContractPanel({
         signerEmail: signerEmail.trim(),
         expiresInDays: 7,
       });
-      if (created.signingUrl)
-        await navigator.clipboard
-          .writeText(`${window.location.origin}${created.signingUrl}`)
-          .catch(() => undefined);
-    }, "Secure signing link created and copied. Email delivery remains queued for the later email phase.");
+      if (created.signingUrl) {
+        const absoluteUrl = new URL(created.signingUrl, window.location.origin).toString();
+        setSigningLinks((current) => ({ ...current, [created.id]: absoluteUrl }));
+        await navigator.clipboard.writeText(absoluteUrl).catch(() => undefined);
+      }
+    }, "Secure signing email queued. The new link is available below and was copied when browser permission allowed it.");
+  };
+  const copySigningLink = async (requestId: string) => {
+    const link = signingLinks[requestId]; if (!link) return;
+    try { await navigator.clipboard.writeText(link); onNotice({ message: "Signing link copied.", tone: "success" }); }
+    catch { onNotice({ message: "The browser blocked clipboard access. Open the link and copy it from the address bar.", tone: "error" }); }
   };
   const openContract = async () => {
     try {
@@ -5080,6 +5699,12 @@ function ContractPanel({
       "Contract sent for review.",
     );
   };
+  const activeFranchiseeRequest = signingRequests.find((item) => item.signerRole === "franchisee" && ["Pending", "Viewed"].includes(item.status));
+  const activeDrCareRequest = signingRequests.find((item) => item.signerRole === "dr-care" && ["Pending", "Viewed"].includes(item.status));
+  const drCareEmailUnreachable = drCareEmail.trim().toLowerCase().endsWith(".local");
+  const requiredContractDocuments = ["FLOOR_PLAN", "PERSPECTIVE"];
+  const uploadedContractDocuments = requiredContractDocuments.filter((type) => contractDocuments.some((item) => item.documentType === type && item.status === "Uploaded"));
+  const contractDocumentsComplete = uploadedContractDocuments.length === requiredContractDocuments.length;
   return (
     <section className="panel tab-panel">
       <PanelHeader
@@ -5099,22 +5724,70 @@ function ContractPanel({
           </div>
         )}
         {contract && (
-          <div className="contract-generated-summary">
+          <>
+          {(() => {
+            const lifecycleStep = contract.status === "RevisionRequested"
+              ? 2
+              : contract.status === "InReview"
+                ? 3
+                : contract.status === "Signed"
+                  ? 5
+                  : contract.status === "Approved"
+                    ? 4
+                  : contractDocumentsComplete
+                    ? 1
+                    : 0;
+            const lifecycleLabels = contract.status === "RevisionRequested"
+              ? ["Draft created", "Documents ready", "Returned for revision", "Resubmit review", "E-signing"]
+              : ["Draft created", "Documents ready", "GM review", "Review outcome", "E-signing"];
+            return (
+              <div className="contract-lifecycle-stepper" aria-label="Contract progress">
+                {lifecycleLabels.map((label, index) => (
+                  <div className={`contract-lifecycle-step ${index < lifecycleStep ? "complete" : index === lifecycleStep ? "active" : "upcoming"}`} key={label}>
+                    <span>{index < lifecycleStep ? <CheckCircle2 size={13} /> : index + 1}</span>
+                    <strong>{label}</strong>
+                    {index < lifecycleLabels.length - 1 && <i />}
+                  </div>
+                ))}
+              </div>
+            );
+          })()}
+          {contract.status === "RevisionRequested" && (
+            <div className="revision-request-card" role="status">
+              <AlertTriangle size={20} />
+              <div>
+                <span className="eyebrow">RETURNED BY GENERAL MANAGER</span>
+                <strong>Contract changes are required</strong>
+                <p>{contract.revisionReason || "The General Manager requested changes to this contract."}</p>
+                <small>
+                  {contract.revisionRequestedAt
+                    ? `Returned ${formatDateTime(contract.revisionRequestedAt)}`
+                    : "Returned for revision"}
+                  {" · Update or regenerate the agreement, then submit it for review again."}
+                </small>
+              </div>
+              <div className="revision-request-actions">
+                <button className="button button-secondary" onClick={openContract}><FileText size={14} /> Open contract</button>
+                {canEditDraft && <button className="button button-secondary" disabled={busy} onClick={() => run(() => api.leads.generateContract(lead.id, { templateCode: template, version: "2026.07", expectedVersion: lead.version }), "Contract regenerated.")}><RefreshCw size={14} /> Regenerate</button>}
+              </div>
+            </div>
+          )}
+          <div className={`contract-generated-summary ${contract.status === "RevisionRequested" ? "revision-pending" : ""}`}>
             <div className="contract-generated-heading">
               <span className="contract-generated-icon">
                 <CheckCircle2 size={18} />
               </span>
               <div>
-                <strong>Contract generated</strong>
+                <div className="contract-status-badge">
+                  {contract.status === "RevisionRequested" ? "Changes requested" : "Generated"}
+                </div>
+                <strong>{contractTemplateLabel(contract.templateCode)}</strong>
                 <small>
-                  {contractTemplateLabel(contract.templateCode)} · Version {contract.version}
+                  Version {contract.version} · Generated {formatDate(contract.updatedAt)}
                 </small>
               </div>
             </div>
-            <span className="contract-generated-date">
-              Generated {formatDate(contract.updatedAt)}
-            </span>
-            <div className="button-row">
+            {contract.status !== "RevisionRequested" && <div className="button-row">
               <button className="button button-secondary" onClick={openContract}>
                 <FileText size={16} /> Open contract
               </button>
@@ -5127,7 +5800,7 @@ function ContractPanel({
                       () =>
                         api.leads.generateContract(lead.id, {
                           templateCode: template,
-                          version: "1",
+                          version: "2026.07",
                           expectedVersion: lead.version,
                         }),
                       "Contract regenerated.",
@@ -5137,20 +5810,9 @@ function ContractPanel({
                   Regenerate
                 </button>
               )}
-              {canEditDraft && (
-                <button
-                  className="button button-primary"
-                  disabled={
-                    busy ||
-                    !["Draft", "RevisionRequested"].includes(contract.status)
-                  }
-                  onClick={submitContractForReview}
-                >
-                  Continue <ChevronRight size={15} />
-                </button>
-              )}
-            </div>
+            </div>}
           </div>
+          </>
         )}
         {!contract && canEditDraft && (
           <div className="inline-form">
@@ -5175,7 +5837,7 @@ function ContractPanel({
                   () =>
                     api.leads.generateContract(lead.id, {
                       templateCode: template,
-                      version: "1",
+                      version: "2026.07",
                       expectedVersion: lead.version,
                     }),
                   contract ? "Contract regenerated." : "Contract generated.",
@@ -5194,76 +5856,142 @@ function ContractPanel({
         )}
         {contract && (
           <>
-            <div className="workflow-instructions">
-              <strong>Contract workflow</strong>
-              <span>
-                1. Marketing Admin drafts the agreement and submits it for
-                review.
-              </span>
-              <span>
-                2. The General Manager completes the review checklist and
-                approves or requests revisions.
-              </span>
-              <span>
-                3. Marketing creates secure e-signing links for both parties.
-              </span>
-            </div>
+            <details className="contract-workflow-disclosure">
+              <summary>
+                <span><CircleHelp size={15} /> <strong>How contract review works</strong></span>
+                <span className="contract-workflow-steps">1) Draft and submit · 2) GM reviews · 3) Secure e-signing <ChevronDown size={15} /></span>
+              </summary>
+              <div className="contract-workflow-details">
+                <span>1. Marketing Admin drafts the agreement and submits it for review.</span>
+                <span>2. The General Manager completes the review checklist and approves or requests revisions.</span>
+                <span>3. Marketing creates secure e-signing links for both parties.</span>
+              </div>
+            </details>
+            {contract.status === "RevisionRequested" && (
+              <div className="contract-feedback-card">
+                <div className="contract-feedback-heading">
+                  <div>
+                    <strong>General Manager feedback</strong>
+                    <span>Please address the following before resubmitting.</span>
+                  </div>
+                  <span className="contract-feedback-requester"><span className="contract-avatar">GM</span> Requested by <strong>{contract.revisionRequestedByName || "General Manager"}</strong></span>
+                </div>
+                <div className="contract-revision-reason">
+                  <span className="contract-feedback-icon"><CircleHelp size={17} /></span>
+                  <div>
+                    <span className="contract-revision-reason-label">Revision reason</span>
+                    <p>{contract.revisionReason || "The General Manager requested changes to this contract."}</p>
+                  </div>
+                </div>
+                <div className="contract-feedback-next">
+                  <strong>Before you resubmit</strong>
+                  <span>Review the reason, update the agreement and required documents, then explain what changed in the resubmission notes below.</span>
+                </div>
+              </div>
+            )}
             {canEditDraft && ["Draft", "RevisionRequested"].includes(contract.status) && (
               <div className="contract-supporting-documents">
-                <div>
-                  <strong>Required drafting documents</strong>
-                  <span>Upload both files before submitting the agreement for GM review.</span>
+                <div className="contract-section-heading">
+                  <div>
+                    <strong>Required drafting documents</strong>
+                    <span>Upload both files before submitting the agreement for GM review.</span>
+                  </div>
+                  <strong className="contract-completion-count">
+                    {contractDocumentsComplete ? <CheckCircle2 size={15} /> : <span className="contract-count-dot" />}
+                    {uploadedContractDocuments.length} of {requiredContractDocuments.length} complete
+                  </strong>
                 </div>
                 <div className="contract-document-grid">
                   <div>
-                    <span className="eyebrow">FLOOR PLAN</span>
+                    <div className={`contract-document-label ${uploadedContractDocuments.includes("FLOOR_PLAN") ? "complete" : "pending"}`}>
+                      {uploadedContractDocuments.includes("FLOOR_PLAN") ? <CheckCircle2 size={15} /> : <span className="contract-check-pending" />} <strong>Floor plan</strong>
+                    </div>
                     <DocumentsPanel
                       lead={lead}
                       onNotice={onNotice}
+                      onDocumentsChanged={reload}
                       embedded
                       fixedDocumentType="FLOOR_PLAN"
                       visibleTypes={["FLOOR_PLAN"]}
+                      compactAfterUpload
+                      documentCard
                     />
                   </div>
                   <div>
-                    <span className="eyebrow">PERSPECTIVE</span>
+                    <div className={`contract-document-label ${uploadedContractDocuments.includes("PERSPECTIVE") ? "complete" : "pending"}`}>
+                      {uploadedContractDocuments.includes("PERSPECTIVE") ? <CheckCircle2 size={15} /> : <span className="contract-check-pending" />} <strong>Perspective</strong>
+                    </div>
                     <DocumentsPanel
                       lead={lead}
                       onNotice={onNotice}
+                      onDocumentsChanged={reload}
                       embedded
                       fixedDocumentType="PERSPECTIVE"
                       visibleTypes={["PERSPECTIVE"]}
+                      compactAfterUpload
+                      documentCard
                     />
                   </div>
                 </div>
               </div>
             )}
-            {(canEditDraft || canReview) && (
+            {canEditDraft && ["Draft", "RevisionRequested"].includes(contract.status) && (
+              <div className="contract-review-submit-card">
+                <div className="contract-review-submit-heading">
+                  <div>
+                    <strong>{contract.status === "RevisionRequested" ? "Address requested changes" : "Ready for GM review"}</strong>
+                    <span>{contract.status === "RevisionRequested" ? "Update the agreement and explain what changed before resubmitting." : "Everything looks good. Add optional notes and submit for GM review."}</span>
+                  </div>
+                </div>
+                <div className="contract-review-submit-body">
+                  <div className="contract-review-checks">
+                    <span><CheckCircle2 size={15} /> Contract generated</span>
+                    <span className={uploadedContractDocuments.includes("FLOOR_PLAN") ? "" : "pending"}>{uploadedContractDocuments.includes("FLOOR_PLAN") ? <CheckCircle2 size={15} /> : <span className="contract-check-pending" />} Floor plan {uploadedContractDocuments.includes("FLOOR_PLAN") ? "uploaded" : "pending"}</span>
+                    <span className={uploadedContractDocuments.includes("PERSPECTIVE") ? "" : "pending"}>{uploadedContractDocuments.includes("PERSPECTIVE") ? <CheckCircle2 size={15} /> : <span className="contract-check-pending" />} Perspective {uploadedContractDocuments.includes("PERSPECTIVE") ? "uploaded" : "pending"}</span>
+                  </div>
+                  <label className="wide-label">
+                    Resubmission notes {contract.status === "Draft" ? "(optional)" : ""}
+                    <textarea
+                      value={notes}
+                      onChange={(e) => setNotes(e.target.value)}
+                      maxLength={4000}
+                      placeholder="Tell the General Manager what was changed"
+                    />
+                  </label>
+                </div>
+                <div className="contract-review-submit-actions">
+                  <span><ShieldCheck size={14} /> Secure and auditable</span>
+                  <button className="button button-primary" disabled={busy} onClick={submitContractForReview}>
+                    <Send size={15} /> Submit for GM review
+                  </button>
+                </div>
+              </div>
+            )}
+            {canChecklist && (
               <label className="wide-label">
-                Review notes
+                Revision reason or approval notes
                 <textarea
                   value={notes}
                   onChange={(e) => setNotes(e.target.value)}
                   maxLength={4000}
-                  placeholder="Add context for the next reviewer"
+                  placeholder="Explain any required changes before returning the contract"
                 />
               </label>
             )}
-            {canEditDraft && (
-              <div className="button-row">
-                <button
-                  className="button button-secondary"
-                  disabled={
-                    busy ||
-                    !["Draft", "RevisionRequested"].includes(contract.status)
-                  }
-                  onClick={submitContractForReview}
-                >
-                  Submit for review
-                </button>
+            {reviewFinished && (
+              <div className="completion-card">
+                <CheckCircle2 size={19} />
+                <div>
+                  <strong>Contract review complete</strong>
+                  <span>
+                    The General Manager approved this contract. The checklist is
+                    locked as the review record, and Marketing owns the signing
+                    step from here.
+                  </span>
+                </div>
               </div>
             )}
-            {checklist && (
+            {canReview && checklist && (
               <div className="contract-checklist">
                 <div className="checklist-summary">
                   <strong>Review checklist</strong>
@@ -5288,7 +6016,7 @@ function ContractPanel({
                     <span>
                       <strong>{item.name}</strong>
                       <small>
-                        {item.required ? "Required" : "Optional"} · {item.code}
+                        {item.required ? "Required" : "Optional"}
                       </small>
                     </span>
                   </button>
@@ -5299,12 +6027,12 @@ function ContractPanel({
                     disabled={busy}
                     onClick={saveChecklist}
                   >
-                    Save review checklist
+                    {checklistDirty ? "Save review checklist" : "Checklist saved"}
                   </button>
                 )}
               </div>
             )}
-            {canReview && (
+            {canChecklist && (
               <div className="button-row">
                 <button
                   className="button button-primary"
@@ -5313,27 +6041,18 @@ function ContractPanel({
                     contract.status !== "InReview" ||
                     !checklist?.complete
                   }
-                  onClick={() =>
-                    run(
-                      () =>
-                        api.leads.approveContract(lead.id, {
-                          notes: notes || "Approved",
-                          expectedVersion: lead.version,
-                        }),
-                      "Contract approved.",
-                    )
-                  }
+                  onClick={approveContract}
                 >
-                  Approve contract
+                  Save checklist & approve
                 </button>
                 <button
                   className="button button-secondary"
-                  disabled={busy || contract.status !== "InReview"}
+                  disabled={busy || contract.status !== "InReview" || notes.trim().length < 2}
                   onClick={() =>
                     run(
                       () =>
                         api.leads.requestRevision(lead.id, {
-                          reason: notes || "Revision requested",
+                          reason: notes.trim(),
                           expectedVersion: lead.version,
                         }),
                       "Revision requested.",
@@ -5344,14 +6063,19 @@ function ContractPanel({
                 </button>
               </div>
             )}
-            {canReview &&
+            {canChecklist &&
               !checklist?.complete &&
-              contract.status === "InReview" && (
+              (
                 <div className="read-only-note">
-                  <ShieldCheck size={16} /> Complete and save every required
-                  review item before approving.
+                  <ShieldCheck size={16} /> Complete every required review item
+                  before approving. Approval saves the latest checklist first.
                 </div>
               )}
+            {canChecklist && contract.status === "InReview" && notes.trim().length < 2 && (
+              <div className="read-only-note">
+                <AlertTriangle size={16} /> Enter a clear reason above before returning the contract for revision.
+              </div>
+            )}
             {canSign && contract.status === "Approved" && (
               <div className="signature-panel">
                 <strong>Electronic signatures</strong>
@@ -5385,7 +6109,7 @@ function ContractPanel({
                         )
                       }
                     >
-                      Create franchisee signing link
+                      {activeFranchiseeRequest ? "Send replacement franchisee link" : "Create franchisee signing link"}
                     </button>
                   </label>
                   <label>
@@ -5401,7 +6125,10 @@ function ContractPanel({
                       value={drCareEmail}
                       onChange={(e) => setDrCareEmail(e.target.value)}
                       placeholder="Email"
+                      aria-invalid={drCareEmailUnreachable}
+                      className={drCareEmailUnreachable ? "field-missing" : undefined}
                     />
+                    {drCareEmailUnreachable && <small className="field-error">Use a real inbox. Development .local addresses cannot receive signing emails.</small>}
                     <button
                       className="button button-secondary"
                       disabled={busy || Boolean(contract.drCareSignerName)}
@@ -5409,18 +6136,28 @@ function ContractPanel({
                         requestSignature("dr-care", drCareName, drCareEmail)
                       }
                     >
-                      Create Dr. Care signing link
+                      {activeDrCareRequest ? "Send replacement Dr. Care link" : "Create Dr. Care signing link"}
                     </button>
                   </label>
                 </div>
-                {signingRequests.length > 0 && (
-                  <div className="action-list">
-                    {signingRequests.map((item) => (
-                      <div className="read-only-note" key={item.id}>
-                        <ShieldCheck size={16} /> {item.signerRole}:{" "}
-                        {item.signerName} — {item.status}
-                      </div>
-                    ))}
+                {signingRequests.some((item) => item.status !== "Voided") && (
+                  <div className="signing-request-list">
+                    {signingRequests.filter((item) => item.status !== "Voided").map((item) => {
+                      const active = ["Pending", "Viewed"].includes(item.status);
+                      const link = signingLinks[item.id];
+                      return <div className="signing-request-row" key={item.id}>
+                        <ShieldCheck size={17} />
+                        <div className="signing-request-copy"><strong>{item.signerName}</strong><span>{item.signerRole === "dr-care" ? "Dr. Care signer" : "Franchisee signer"} · {item.signerEmail}</span><small>{statusLabel(item.status)} · {item.emailQueued ? "Invitation email queued" : "Invitation was not emailed — send a new link"} · Expires {formatDate(item.expiresAt)}</small></div>
+                        <div className="signing-request-actions">
+                          {link && <><button className="button button-secondary" onClick={() => copySigningLink(item.id)}><Copy size={14} /> Copy link</button><a className="button button-primary" href={link} target="_blank" rel="noreferrer">Open link <ArrowUpRight size={14} /></a></>}
+                          {active && !link && <button className="button button-secondary" disabled={busy} onClick={() => {
+                            if (item.signerEmail.toLowerCase().endsWith(".local")) { setDrCareName(item.signerName); setDrCareEmail(""); onNotice({ message: "Enter a real Dr. Care signer inbox above, then send the replacement link.", tone: "error" }); return; }
+                            void requestSignature(item.signerRole as "franchisee" | "dr-care", item.signerName, item.signerEmail);
+                          }}>{item.signerEmail.toLowerCase().endsWith(".local") ? "Change email" : "Send new link"}</button>}
+                          {active && <button className="button button-secondary signing-cancel" disabled={busy} onClick={() => run(() => api.leads.voidSigningRequest(lead.id, item.id), "Signing request cancelled.")}>Cancel</button>}
+                        </div>
+                      </div>;
+                    })}
                   </div>
                 )}
               </div>
@@ -5444,6 +6181,141 @@ function ContractPanel({
   );
 }
 
+type PreLaunchFilter = "all" | "incomplete" | "blocked" | "completed";
+type PreLaunchChecklistItem = {
+  id: string;
+  code: string;
+  name: string;
+  required: boolean;
+  complete: boolean;
+  paused: boolean;
+  notes?: string;
+  completedAt?: string;
+};
+
+const preLaunchCategoryDefinitions = [
+  { key: "site", label: "Site & Compliance", description: "Location, permits, lease, and site requirements." },
+  { key: "business", label: "Business & Finance", description: "Commercial, payment, and financial readiness." },
+  { key: "clinical", label: "Clinical & Staffing", description: "Staff assignments, credentials, and training." },
+  { key: "operations", label: "Operations", description: "Inventory, receipts, and operating setup." },
+  { key: "launch", label: "Launch Preparation", description: "Final coordination and opening readiness." },
+] as const;
+
+const preLaunchCategoryCodes: Record<string, string[]> = {
+  site: ["DOH_FLOOR_PLAN", "LOCATION_ANALYSIS", "LEASE_AND_ADDRESS", "PERMITS", "SIGNAGE_AND_COMPLIANCE", "PHARMACY_PERMITS", "PHARMACY_SITE_READY"],
+  business: ["BUSINESS_PROPOSAL", "FINANCING_PLAN", "BANK_DETAILS", "FULL_PAYMENT", "BUSINESS_PLAN", "OFFICIAL_RECEIPT"],
+  clinical: ["CLINICAL_STAFF", "CLINICAL_CREDENTIALS", "ANIMAL_BITE_TRAINING", "TRAINING_APPLICATION", "PHARMACY_STAFF", "PHARMACY_TRAINING"],
+  operations: ["VALID_ID_TIN", "ACKNOWLEDGEMENT_RECEIPT", "DTI_REGISTRATION", "SITE_PHOTOS", "ABC_PRELAUNCH_CHECKLIST", "OPENING_STOCKS", "INVENTORY_PLAN", "PHARMACY_PRELAUNCH_CHECKLIST", "PHARMACY_OPENING_STOCKS"],
+  launch: ["APPLICATION_FORM", "PRELAUNCH_MEETING", "LEAD_TIME", "GRAND_OPENING", "FRANCHISE_AGREEMENT"],
+};
+
+const preLaunchDocumentCodes = new Set([
+  "DOH_FLOOR_PLAN", "LEASE_AND_ADDRESS", "DTI_REGISTRATION", "SITE_PHOTOS", "PERMITS",
+  "BUSINESS_PLAN", "VALID_ID_TIN", "FRANCHISE_AGREEMENT", "TRAINING_APPLICATION", "PHARMACY_PERMITS",
+]);
+
+function preLaunchCategoryFor(code: string) {
+  const normalized = code.trim().toUpperCase();
+  return preLaunchCategoryDefinitions.find((category) => preLaunchCategoryCodes[category.key].includes(normalized)) ?? preLaunchCategoryDefinitions.at(-1)!;
+}
+
+function preLaunchBlockedReason(item: PreLaunchChecklistItem) {
+  if (item.code.trim().toUpperCase() === "ANIMAL_BITE_TRAINING") return "Waiting for a qualified doctor or nurse to be assigned.";
+  return "Waiting for the prerequisite to be completed.";
+}
+
+function preLaunchItemMeta(item: PreLaunchChecklistItem, categoryLabel: string) {
+  if (item.paused) return { label: "Blocked", detail: preLaunchBlockedReason(item), tone: "blocked" };
+  if (item.complete) return { label: "Completed", detail: item.completedAt ? `Completed ${formatDate(item.completedAt)}` : "Requirement completed", tone: "complete" };
+  if (preLaunchDocumentCodes.has(item.code.trim().toUpperCase())) return { label: "Required document", detail: `Not uploaded · ${categoryLabel}`, tone: "pending" };
+  if (["CLINICAL_STAFF", "PHARMACY_STAFF"].includes(item.code.trim().toUpperCase())) return { label: "Required", detail: "Not assigned", tone: "pending" };
+  return { label: item.required ? "Required" : "Optional", detail: `Not completed · ${categoryLabel}`, tone: "pending" };
+}
+
+function documentRequirementsCount(items: PreLaunchChecklistItem[], completedOnly: boolean) {
+  return items.filter((item) => preLaunchDocumentCodes.has(item.code.trim().toUpperCase()) && (!completedOnly || item.complete)).length;
+}
+
+function PreLaunchDocumentRequirement({
+  lead,
+  item,
+  onNotice,
+  onDocumentsChanged,
+}: {
+  lead: Lead;
+  item: PreLaunchChecklistItem;
+  onNotice: (notice: Notice) => void;
+  onDocumentsChanged?: () => Promise<void>;
+}) {
+  const [documents, setDocuments] = useState<DocumentItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [expanded, setExpanded] = useState(false);
+  const documentType = item.code.trim().toUpperCase();
+  const uploadedDocuments = documents.filter(
+    (document) => document.documentType.trim().toUpperCase() === documentType && document.status === "Uploaded",
+  );
+  const pendingDocuments = documents.filter(
+    (document) => document.documentType.trim().toUpperCase() === documentType && document.status !== "Archived" && document.status !== "Uploaded",
+  );
+  const reload = async () => {
+    setLoading(true);
+    try {
+      setDocuments(await api.leads.documents(lead.id));
+    } catch (e) {
+      onNotice({ message: errorMessage(e, "Unable to load the required document."), tone: "error" });
+    } finally {
+      setLoading(false);
+    }
+  };
+  useEffect(() => {
+    void reload();
+  }, [lead.id, documentType]);
+  const handleDocumentsChanged = async () => {
+    await reload();
+    await onDocumentsChanged?.();
+  };
+  const statusLabel = loading
+    ? "Checking file status…"
+    : uploadedDocuments.length
+      ? `${uploadedDocuments.length} file${uploadedDocuments.length === 1 ? "" : "s"} uploaded`
+      : pendingDocuments.length
+        ? "Upload in progress"
+        : "No file uploaded yet";
+  return (
+    <div className="prelaunch-document-requirement">
+      <div className="prelaunch-document-summary">
+        <span className="prelaunch-document-summary-icon"><FileText size={14} /></span>
+        <span className="prelaunch-document-summary-copy">
+          <strong>Required document</strong>
+          <small>{statusLabel} · {documentTypeLabel(documentType)}</small>
+        </span>
+        <button
+          type="button"
+          className="text-link prelaunch-document-toggle"
+          onClick={() => setExpanded((current) => !current)}
+        >
+          {uploadedDocuments.length ? "Manage file" : "Upload document"}
+          {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+        </button>
+      </div>
+      {expanded && (
+        <div className="prelaunch-document-editor">
+          <DocumentsPanel
+            lead={lead}
+            onNotice={onNotice}
+            onDocumentsChanged={handleDocumentsChanged}
+            embedded
+            fixedDocumentType={documentType}
+            visibleTypes={[documentType]}
+            compactAfterUpload
+            documentCard
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
 function PreLaunchPanel({
   lead,
   onReload,
@@ -5455,18 +6327,14 @@ function PreLaunchPanel({
 }) {
   const [checklist, setChecklist] = useState<{
     status: string;
-    items: {
-      id: string;
-      code: string;
-      name: string;
-      required: boolean;
-      complete: boolean;
-      paused: boolean;
-      notes?: string;
-    }[];
+    items: PreLaunchChecklistItem[];
   } | null>(null);
   const [busy, setBusy] = useState(false);
   const [nurseOrDoctorAvailable, setNurseOrDoctorAvailable] = useState(false);
+  const [signedContractReviewed, setSignedContractReviewed] = useState(false);
+  const [filter, setFilter] = useState<PreLaunchFilter>("all");
+  const [openCategories, setOpenCategories] = useState<Record<string, boolean>>({});
+  const itemOrder = useRef<string[]>([]);
   const canComplete = hasRole(session.user?.role, marketingWriteRoles);
   const reload = () =>
     api.leads
@@ -5474,17 +6342,41 @@ function PreLaunchPanel({
       .then((value) => setChecklist(value as typeof checklist))
       .catch(() => setChecklist(null));
   useEffect(() => {
+    setFilter("all");
+    setOpenCategories({});
+    itemOrder.current = [];
+    setSignedContractReviewed(false);
     void reload();
   }, [lead.id]);
+  useEffect(() => {
+    if (!checklist) return;
+    const ids = checklist.items.map((item) => item.id);
+    const current = new Set(itemOrder.current);
+    itemOrder.current = [
+      ...itemOrder.current.filter((id) => ids.includes(id)),
+      ...ids.filter((id) => !current.has(id)),
+    ];
+  }, [checklist]);
+  const openSignedContract = async () => {
+    try {
+      const result = await api.leads.contractDownload(lead.id);
+      window.open(result.downloadUrl, "_blank", "noopener,noreferrer");
+    } catch (e) {
+      onNotice({ message: errorMessage(e, "Unable to open the signed agreement."), tone: "error" });
+    }
+  };
   const initialize = async () => {
     setBusy(true);
     try {
-      await api.leads.initializePreLaunch(lead.id, nurseOrDoctorAvailable);
+      await api.leads.initializePreLaunch(lead.id, nurseOrDoctorAvailable, signedContractReviewed);
       onNotice({
-        message: "Product-specific checklist initialized.",
+        message: lead.state === "ContractSigned"
+          ? "Signed agreement reviewed and pre-launch started."
+          : "Product-specific checklist initialized.",
         tone: "success",
       });
       await reload();
+      await onReload();
     } catch (e) {
       onNotice({
         message: errorMessage(e, "Unable to initialize checklist."),
@@ -5500,6 +6392,7 @@ function PreLaunchPanel({
         complete: !item.complete,
       });
       await reload();
+      await onReload();
     } catch (e) {
       onNotice({
         message: errorMessage(e, "Unable to update checklist item."),
@@ -5525,24 +6418,84 @@ function PreLaunchPanel({
       setBusy(false);
     }
   };
+  // The API does not guarantee collection ordering after an update. Keep the
+  // first-seen order so checking an item never makes the checklist jump around.
+  const checklistItems = [...(checklist?.items ?? [])].sort((left, right) => {
+    const leftIndex = itemOrder.current.indexOf(left.id);
+    const rightIndex = itemOrder.current.indexOf(right.id);
+    return (leftIndex < 0 ? Number.MAX_SAFE_INTEGER : leftIndex) - (rightIndex < 0 ? Number.MAX_SAFE_INTEGER : rightIndex);
+  });
+  const totalItems = checklistItems.length;
+  const completedItems = checklistItems.filter((item) => item.complete).length;
+  const blockedItems = checklistItems.filter((item) => item.paused);
+  const remainingItems = totalItems - completedItems;
+  const completionPercent = totalItems ? Math.round((completedItems / totalItems) * 100) : 0;
+  const filterCounts = {
+    all: totalItems,
+    incomplete: checklistItems.filter((item) => !item.complete).length,
+    blocked: blockedItems.length,
+    completed: completedItems,
+  };
+  const matchesFilter = (item: PreLaunchChecklistItem) =>
+    filter === "all" || (filter === "completed" ? item.complete : filter === "blocked" ? item.paused : !item.complete);
+  const groupedCategories = preLaunchCategoryDefinitions
+    .map((definition, index) => ({
+      ...definition,
+      index,
+      items: checklistItems.filter((item) => matchesFilter(item) && preLaunchCategoryFor(item.code).key === definition.key),
+      allItems: checklistItems.filter((item) => preLaunchCategoryFor(item.code).key === definition.key),
+    }))
+    .filter((category) => category.items.length > 0);
+  const firstIncomplete = blockedItems[0] ?? checklistItems.find((item) => !item.complete);
+  const requiredIncomplete = checklistItems.some((item) => item.required && !item.complete);
+  const nextCategory = firstIncomplete ? preLaunchCategoryFor(firstIncomplete.code) : null;
+  const focusBlocked = () => {
+    setFilter("blocked");
+    if (blockedItems[0]) setOpenCategories((current) => ({ ...current, [preLaunchCategoryFor(blockedItems[0].code).key]: true }));
+  };
   return (
     <>
     <section className="panel tab-panel">
       <PanelHeader
-        title="Pre-launch readiness"
-        subtitle="ABC checklists include the required animal-bite training item."
+        title={lead.state === "ContractSigned" ? "Review signed agreement" : "Pre-launch readiness"}
+        subtitle={lead.state === "ContractSigned"
+          ? "Both parties have signed. Review the final agreement before starting pre-launch."
+          : "ABC checklists include the required animal-bite training item."}
       />
       {!checklist ? (
         canComplete ? (
           <div className="empty-feature">
-            <div className="empty-feature-icon">
-              <ClipboardCheck size={25} />
-            </div>
-            <h2>Start the readiness checklist</h2>
+            {lead.state === "ContractSigned" ? (
+              <div className="signed-contract-review-card">
+                <div className="signed-contract-review-icon"><FileText size={22} /></div>
+                <div>
+                  <strong>Signed agreement ready for review</strong>
+                  <span>Open the final PDF and confirm that you reviewed it before starting the pre-launch checklist.</span>
+                </div>
+                <button className="button button-secondary" onClick={openSignedContract}>
+                  <FileText size={14} /> Open signed agreement
+                </button>
+              </div>
+            ) : (
+              <div className="empty-feature-icon">
+                <ClipboardCheck size={25} />
+              </div>
+            )}
+            <h2>{lead.state === "ContractSigned" ? "Start pre-launch when ready" : "Start the readiness checklist"}</h2>
             <p>
-              Initialize the checklist to load the product-specific launch
-              requirements.
+              {lead.state === "ContractSigned"
+                ? "Starting pre-launch is a separate step so the signed agreement can be reviewed first."
+                : "Initialize the checklist to load the product-specific launch requirements."}
             </p>
+            {lead.state === "ContractSigned" && (
+              <label className="signature-consent signed-contract-review-confirmation">
+                <input
+                  type="checkbox"
+                  checked={signedContractReviewed}
+                  onChange={(e) => setSignedContractReviewed(e.target.checked)}
+                /> I reviewed the fully signed agreement and it is ready for pre-launch.
+              </label>
+            )}
             {(lead.productLine === "Abc" || lead.productLine === "Combo") && (
               <label className="signature-consent">
                 <input
@@ -5556,100 +6509,217 @@ function PreLaunchPanel({
             <button
               className="button button-primary"
               onClick={initialize}
-              disabled={busy}
+              disabled={busy || (lead.state === "ContractSigned" && !signedContractReviewed)}
             >
-              Initialize checklist
+              {lead.state === "ContractSigned" ? "Start pre-launch" : "Initialize checklist"}
             </button>
           </div>
         ) : (
-          <div className="read-only-note">
-            <ShieldCheck size={16} /> The readiness checklist has not been
-            initialized.
-          </div>
-        )
-      ) : (
-        <div className="checklist">
-          <div className="checklist-summary">
-            <StatusPill
-              state={
-                checklist.status.toUpperCase() === "COMPLETED"
-                  ? "Qualified"
-                  : "PreLaunch"
-              }
-              label={checklist.status}
-            />
-            <span>
-              {checklist.items.filter((item) => item.complete).length} of{" "}
-              {checklist.items.length} complete
-            </span>
-          </div>
-          {checklist.items.map((item) =>
-            canComplete && checklist.status.toUpperCase() !== "COMPLETED" ? (
-              <button
-                className={`checklist-item ${item.complete ? "complete" : ""} ${item.paused ? "paused" : ""}`}
-                key={item.id}
-                onClick={() => toggle(item)}
-                disabled={item.paused}
-              >
-                <span className={`checkbox ${item.complete ? "checked" : ""}`}>
-                  {item.complete && <CheckCircle2 size={14} />}
-                </span>
-                <span>
-                  <strong>{item.name}</strong>
-                  <small>
-                    {item.paused
-                      ? "Paused — nurse or doctor unavailable"
-                      : item.required
-                        ? "Required"
-                        : "Optional"}{" "}
-                    · {item.code}
-                  </small>
-                </span>
-              </button>
-            ) : (
-              <div
-                className={`checklist-item ${item.complete ? "complete" : ""}`}
-                key={item.id}
-              >
-                <span className={`checkbox ${item.complete ? "checked" : ""}`}>
-                  {item.complete && <CheckCircle2 size={14} />}
-                </span>
-                <span>
-                  <strong>{item.name}</strong>
-                  <small>
-                    {item.required ? "Required" : "Optional"} · {item.code}
-                  </small>
-                </span>
-              </div>
-            ),
-          )}
-          {canComplete && checklist.status.toUpperCase() !== "COMPLETED" ? (
-            <button
-              className="button button-primary"
-              onClick={complete}
-              disabled={
-                busy ||
-                checklist.items.some((item) => item.required && !item.complete)
-              }
-            >
-              Complete pre-launch
-            </button>
-          ) : checklist.status.toUpperCase() === "COMPLETED" ? (
-            <div className="completion-card">
-              <CheckCircle2 size={19} />
+          lead.state === "ContractSigned" ? (
+            <div className="signed-contract-review-card signed-contract-review-card-readonly">
+              <div className="signed-contract-review-icon"><FileText size={22} /></div>
               <div>
-                <strong>Pre-launch completed</strong>
-                <span>
-                  This finished checklist is read-only and ready for
-                  endorsement.
-                </span>
+                <strong>Signed agreement ready for review</strong>
+                <span>Review the final agreement before an authorized Marketing user starts pre-launch.</span>
               </div>
+              <button className="button button-secondary" onClick={openSignedContract}>
+                <FileText size={14} /> Open signed agreement
+              </button>
             </div>
           ) : (
             <div className="read-only-note">
-              <ShieldCheck size={16} /> Checklist is view-only for your role.
+              <ShieldCheck size={16} /> The readiness checklist has not been
+              initialized.
             </div>
-          )}
+          )
+        )
+      ) : (
+        <div className="prelaunch-readiness-layout">
+          <div className="prelaunch-checklist-main">
+            <div className="prelaunch-readiness-header">
+              <div>
+                <span className="eyebrow">PRE-LAUNCH READINESS</span>
+                <h2>Everything required before handoff and opening.</h2>
+                <span>{statusLabel(checklist.status)} · {totalItems} requirements tracked</span>
+              </div>
+              <div className="prelaunch-readiness-percent">
+                <strong>{completionPercent}%</strong>
+                <span>{completedItems} of {totalItems} completed</span>
+              </div>
+            </div>
+            <div className="prelaunch-progress-track" aria-label={`${completionPercent}% complete`}>
+              <i style={{ width: `${completionPercent}%` }} />
+            </div>
+            <div className="prelaunch-readiness-stats">
+              <span>{remainingItems} remaining</span>
+              <span>{blockedItems.length} blocked</span>
+              <span>{completedItems} completed</span>
+            </div>
+
+            {blockedItems.length > 0 && (
+              <div className="prelaunch-blocker-callout" role="status">
+                <span className="prelaunch-blocker-icon"><AlertTriangle size={17} /></span>
+                <div>
+                  <strong>{blockedItems.length} item{blockedItems.length === 1 ? " is" : "s are"} blocked</strong>
+                  <span>{preLaunchBlockedReason(blockedItems[0])}</span>
+                </div>
+                <button type="button" className="text-link" onClick={focusBlocked}>View blocker <ChevronRight size={14} /></button>
+              </div>
+            )}
+
+            <div className="prelaunch-filter-row" role="tablist" aria-label="Checklist filters">
+              {([
+                ["all", "All"],
+                ["incomplete", "Incomplete"],
+                ["blocked", "Blocked"],
+                ["completed", "Completed"],
+              ] as [PreLaunchFilter, string][]).map(([value, label]) => (
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={filter === value}
+                  className={filter === value ? "active" : ""}
+                  onClick={() => setFilter(value)}
+                  key={value}
+                >
+                  {label} <span>{filterCounts[value]}</span>
+                </button>
+              ))}
+            </div>
+
+            <div className="prelaunch-category-list">
+              {groupedCategories.length ? groupedCategories.map((category) => {
+                const categoryCompleted = category.allItems.filter((item) => item.complete).length;
+                const categoryBlocked = category.allItems.filter((item) => item.paused).length;
+                const isOpen = openCategories[category.key] ?? category.index === 0;
+                return (
+                  <section className="prelaunch-category" key={category.key}>
+                    <button
+                      type="button"
+                      className="prelaunch-category-header"
+                      aria-expanded={isOpen}
+                      onClick={() => setOpenCategories((current) => ({ ...current, [category.key]: !isOpen }))}
+                    >
+                      <span className="prelaunch-category-chevron">{isOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}</span>
+                      <span className="prelaunch-category-title">
+                        <strong>{category.label}</strong>
+                        <small>{category.description}</small>
+                      </span>
+                      <span className="prelaunch-category-count">{categoryCompleted} / {category.allItems.length} complete</span>
+                      {categoryBlocked > 0 && <span className="prelaunch-category-blocked">{categoryBlocked} blocked</span>}
+                    </button>
+                    {isOpen && (
+                      <div className="prelaunch-category-items">
+                        {category.items.map((item) => {
+                          const meta = preLaunchItemMeta(item, category.label);
+                          const canToggle = canComplete && checklist.status.toUpperCase() !== "COMPLETED" && !item.paused;
+                          return (
+                            <div
+                              className={`prelaunch-item ${item.complete ? "complete" : ""} ${item.paused ? "blocked" : ""}`}
+                              key={item.id}
+                            >
+                              <button
+                                type="button"
+                                className="prelaunch-item-toggle"
+                                onClick={() => toggle(item)}
+                                disabled={!canToggle}
+                                title={!canToggle && item.paused ? preLaunchBlockedReason(item) : undefined}
+                              >
+                                <span className={`prelaunch-item-check ${item.complete ? "checked" : ""}`}>
+                                  {item.complete && <CheckCircle2 size={14} />}
+                                </span>
+                                <span className="prelaunch-item-copy">
+                                  <strong>{item.name}</strong>
+                                  <small>{meta.detail}</small>
+                                </span>
+                              </button>
+                              <span className={`prelaunch-item-status ${meta.tone}`}>
+                                <strong>{meta.label}</strong>
+                                {item.paused && <AlertTriangle size={13} />}
+                              </span>
+                              {preLaunchDocumentCodes.has(item.code.trim().toUpperCase()) && (
+                                <PreLaunchDocumentRequirement
+                                  lead={lead}
+                                  item={item}
+                                  onNotice={onNotice}
+                                  onDocumentsChanged={async () => {
+                                    await reload();
+                                  }}
+                                />
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </section>
+                );
+              }) : (
+                <div className="prelaunch-filter-empty">
+                  <Filter size={17} /> No requirements match this filter.
+                </div>
+              )}
+            </div>
+
+            {canComplete && checklist.status.toUpperCase() !== "COMPLETED" ? (
+              <div className="prelaunch-sticky-footer">
+                <div>
+                  <strong>{completedItems} of {totalItems} requirements complete</strong>
+                  <span>{remainingItems} requirements remaining</span>
+                </div>
+                <button
+                  className="button button-primary"
+                  onClick={complete}
+                  disabled={busy || requiredIncomplete}
+                  title={requiredIncomplete ? "Complete all required items before finishing pre-launch." : undefined}
+                >
+                  Complete pre-launch <ChevronRight size={15} />
+                </button>
+              </div>
+            ) : checklist.status.toUpperCase() === "COMPLETED" ? (
+              <div className="completion-card">
+                <CheckCircle2 size={19} />
+                <div>
+                  <strong>Pre-launch completed</strong>
+                  <span>This finished checklist is read-only and ready for endorsement.</span>
+                </div>
+              </div>
+            ) : (
+              <div className="read-only-note">
+                <ShieldCheck size={16} /> Checklist is view-only for your role.
+              </div>
+            )}
+          </div>
+
+          <aside className="prelaunch-readiness-sidebar">
+            <section className="prelaunch-summary-card">
+              <div className="prelaunch-sidebar-heading">
+                <strong>Readiness summary</strong>
+                <StatusPill state={checklist.status.toUpperCase() === "COMPLETED" ? "Qualified" : "PreLaunch"} label={statusLabel(checklist.status)} />
+              </div>
+              <div className="prelaunch-summary-metrics">
+                <div><strong>{completedItems} / {totalItems}</strong><span>Complete</span></div>
+                <div><strong>{completionPercent}%</strong><span>Ready</span></div>
+                <div><strong>{remainingItems}</strong><span>Remaining</span></div>
+                <div><strong>{blockedItems.length}</strong><span>Blocked</span></div>
+                <div><strong>{documentRequirementsCount(checklistItems, true)} / {documentRequirementsCount(checklistItems, false)}</strong><span>Documents</span></div>
+                <div><strong>{remainingItems}</strong><span>Assigned to this step</span></div>
+              </div>
+            </section>
+            <section className="prelaunch-next-action-card">
+              <span className="eyebrow">NEXT RECOMMENDED ACTION</span>
+              <strong>{blockedItems.length ? "Resolve blocked requirement" : firstIncomplete ? firstIncomplete.name : "All requirements complete"}</strong>
+              <p>{blockedItems.length ? preLaunchBlockedReason(blockedItems[0]) : firstIncomplete ? "Complete this requirement to move the readiness score forward." : "The checklist is ready for completion and handoff."}</p>
+              {firstIncomplete && (
+                <button type="button" className="button button-secondary" onClick={() => {
+                  setFilter(firstIncomplete.paused ? "blocked" : "incomplete");
+                  if (nextCategory) setOpenCategories((current) => ({ ...current, [nextCategory.key]: true }));
+                }}>
+                  View requirement <ChevronRight size={14} />
+                </button>
+              )}
+            </section>
+          </aside>
         </div>
       )}
     </section>
@@ -5680,6 +6750,8 @@ function EndorsementPanel({
       .then((value) => setEndorsement(value as Record<string, unknown>))
       .catch(() => setEndorsement(null));
   }, [lead.id]);
+  const acknowledged =
+    String(endorsement?.status ?? "").toLowerCase() === "acknowledged";
   const create = async () => {
     try {
       const value = await api.leads.createEndorsement(lead.id, {
@@ -5700,17 +6772,44 @@ function EndorsementPanel({
   return (
     <section className="panel tab-panel">
       <PanelHeader
-        title="Handoff"
-        subtitle="Route a completed opportunity to the receiving team with context."
+        title={acknowledged ? "Handoff complete" : "Handoff"}
+        subtitle={
+          acknowledged
+            ? "The Admin Team acknowledged this opportunity. The downstream process is now complete."
+            : "Route a completed opportunity to the receiving team with context."
+        }
       />
-      {endorsement ? (
+      {endorsement && acknowledged ? (
+        <div className="handoff-finished-card">
+          <div className="completion-card">
+            <CheckCircle2 size={19} />
+            <div>
+              <strong>Opportunity handed off successfully</strong>
+              <span>
+                The Admin Team acknowledged the completed franchise handoff. No
+                further Marketing action is required.
+              </span>
+            </div>
+          </div>
+          <div className="snapshot-grid">
+            <Info label="Receiving team" value={String(endorsement.receivingTeam)} />
+            <Info label="Status" value={statusLabel(String(endorsement.status))} />
+            <Info label="Handoff created" value={formatDate(String(endorsement.createdAt))} />
+            <Info
+              label="Acknowledged"
+              value={endorsement.acknowledgedAt ? formatDate(String(endorsement.acknowledgedAt)) : "—"}
+            />
+          </div>
+          <p className="callout">{String(endorsement.handoffNotes)}</p>
+        </div>
+      ) : endorsement ? (
         <div className="process-card">
           <div className="snapshot-grid">
             <Info
               label="Receiving team"
               value={String(endorsement.receivingTeam)}
             />
-            <Info label="Status" value={String(endorsement.status)} />
+            <Info label="Status" value={statusLabel(String(endorsement.status))} />
             <Info
               label="Created"
               value={formatDate(String(endorsement.createdAt))}
@@ -5756,6 +6855,7 @@ function AdminEndorsementPanel({
     status: string;
     handoffNotes: string;
     createdAt: string;
+    acknowledgedAt?: string;
     items?: {
       code: string;
       name: string;
@@ -5802,12 +6902,16 @@ function AdminEndorsementPanel({
   return (
     <section className="panel tab-panel">
       <PanelHeader
-        title="Receive endorsement"
-        subtitle="Review the exact boundary between completed Marketing work and remaining Admin work."
+        title={item.status === "Acknowledged" ? "Handoff complete" : "Receive endorsement"}
+        subtitle={
+          item.status === "Acknowledged"
+            ? "This opportunity has been accepted by the Admin Team and is now complete."
+            : "Review the exact boundary between completed Marketing work and remaining Admin work."
+        }
       />
       <div className="snapshot-grid">
         <Info label="Receiving team" value={item.receivingTeam} />
-        <Info label="Status" value={item.status} />
+        <Info label="Status" value={statusLabel(item.status)} />
         <Info label="Created" value={formatDate(item.createdAt)} />
       </div>
       <p className="callout">{item.handoffNotes}</p>
@@ -5844,10 +6948,13 @@ function AdminEndorsementPanel({
       ) : (
         <div className="completion-card">
           <CheckCircle2 size={19} />
-          <div>
-            <strong>Handoff acknowledged</strong>
-            <span>The Admin team now owns the downstream process.</span>
-          </div>
+              <div>
+                <strong>Handoff acknowledged</strong>
+                <span>
+                  The Admin Team now owns the downstream process.
+                  {item.acknowledgedAt ? ` Acknowledged ${formatDate(item.acknowledgedAt)}.` : ""}
+                </span>
+              </div>
         </div>
       )}
     </section>
@@ -5858,15 +6965,22 @@ function AuditPanel({ leadId }: { leadId: string }) {
   const [logs, setLogs] = useState<
     { id: string; leadId?: string; action: string; createdAt: string }[]
   >([]);
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [busy, setBusy] = useState(false);
+  const load = async (requestedPage: number) => {
+    setBusy(true);
+    try {
+      const response = await api.audit.list(leadId, requestedPage);
+      setLogs(response.items);
+      setPage(response.page);
+      setTotal(response.total);
+    } finally {
+      setBusy(false);
+    }
+  };
   useEffect(() => {
-    api.audit
-      .list()
-      .then((value) =>
-        setLogs(
-          (value as typeof logs).filter((item) => item.leadId === leadId),
-        ),
-      )
-      .catch(() => undefined);
+    void load(1);
   }, [leadId]);
   return (
     <section className="panel tab-panel">
@@ -5895,6 +7009,15 @@ function AuditPanel({ leadId }: { leadId: string }) {
           text="New workflow changes will appear here."
         />
       )}
+      {total > 10 && (
+        <PaginationControls
+          page={page}
+          totalPages={Math.max(1, Math.ceil(total / 10))}
+          total={total}
+          busy={busy}
+          onPageChange={(nextPage) => load(nextPage)}
+        />
+      )}
     </section>
   );
 }
@@ -5911,6 +7034,10 @@ function TasksContent({
   user: NonNullable<typeof session.user>;
 }) {
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [completedWork, setCompletedWork] = useState<CompletedWorkItem[]>([]);
+  const [completedPage, setCompletedPage] = useState(1);
+  const [completedTotal, setCompletedTotal] = useState(0);
+  const [completedPageBusy, setCompletedPageBusy] = useState(false);
   const [leads, setLeads] = useState<Lead[]>([]);
   const [loading, setLoading] = useState(true);
   const [createOpen, setCreateOpen] = useState(false);
@@ -5919,11 +7046,15 @@ function TasksContent({
   const canManageTasks = hasRole(user.role, marketingWriteRoles);
   const load = async () => {
     try {
-      const [nextTasks, nextLeads] = await Promise.all([
+      const [nextTasks, nextCompletedWork, nextLeads] = await Promise.all([
         api.tasks.list(),
+        api.tasks.completed(1),
         api.leads.list("?limit=100&sort=updatedAt"),
       ]);
       setTasks(nextTasks);
+      setCompletedWork(nextCompletedWork.items);
+      setCompletedPage(nextCompletedWork.page);
+      setCompletedTotal(nextCompletedWork.total);
       setLeads(nextLeads.items);
     } catch (e) {
       setNotice({
@@ -5937,6 +7068,23 @@ function TasksContent({
   useEffect(() => {
     void load();
   }, []);
+  const loadCompletedPage = async (page: number) => {
+    if (completedPageBusy) return;
+    setCompletedPageBusy(true);
+    try {
+      const response = await api.tasks.completed(page);
+      setCompletedWork(response.items);
+      setCompletedPage(response.page);
+      setCompletedTotal(response.total);
+    } catch (e) {
+      setNotice({
+        message: errorMessage(e, "Unable to load completed work."),
+        tone: "error",
+      });
+    } finally {
+      setCompletedPageBusy(false);
+    }
+  };
   const complete = async (task: Task) => {
     try {
       await api.tasks.complete(task.id, {});
@@ -5963,8 +7111,22 @@ function TasksContent({
     }
   };
   const leadById = new Map(leads.map((lead) => [lead.id, lead]));
-  const openTasks = tasks.filter((task) => task.status === "Open");
-  const completedTasks = tasks.filter((task) => task.status === "Completed");
+  const persistedOpenTasks = tasks.filter((task) => task.status === "Open");
+  const persistedLeadIds = new Set(persistedOpenTasks.map((task) => task.leadId));
+  const workflowDueAt = new Date();
+  workflowDueAt.setHours(23, 59, 59, 999);
+  const workflowTasks: Task[] = leads
+    .filter((lead) => isMyCurrentAction(lead, user) && !persistedLeadIds.has(lead.id))
+    .map((lead) => ({
+      id: `workflow:${lead.id}`,
+      leadId: lead.id,
+      assignedTo: user.id,
+      title: nextStepForLead(lead, Boolean(lead.downPaymentSubmittedForFinance)).label,
+      status: "Open" as const,
+      createdAt: lead.updatedAt,
+      dueAt: workflowDueAt.toISOString(),
+    }));
+  const openTasks = [...persistedOpenTasks, ...workflowTasks];
   const overdueTasks = openTasks.filter(
     (task) => taskDueState(task) === "overdue",
   );
@@ -5986,7 +7148,7 @@ function TasksContent({
   return (
     <Page
       title="My work queue"
-      subtitle="Everything assigned to you that needs attention."
+      subtitle="Everything assigned to you that needs attention, plus your completed work history."
       actions={
         canManageTasks ? (
           <button
@@ -6020,7 +7182,7 @@ function TasksContent({
         </div>
         <div className="queue-summary-secondary">
           <span>Open {openTasks.length}</span>
-          <span>Completed {completedTasks.length}</span>
+          <span>Completed {completedTotal}</span>
         </div>
       </div>
       <div className="queue-view-tabs" role="tablist" aria-label="Task status">
@@ -6038,7 +7200,7 @@ function TasksContent({
           className={view === "completed" ? "active" : ""}
           onClick={() => setView("completed")}
         >
-          Completed <span>{completedTasks.length}</span>
+          Completed <span>{completedTotal}</span>
         </button>
       </div>
       {loading ? (
@@ -6047,27 +7209,34 @@ function TasksContent({
         <section className="panel task-queue-panel">
           <PanelHeader
             title="Completed recently"
-            subtitle="A record of work already finished."
+            subtitle="Tasks and workflow actions you completed."
           />
-          {completedTasks.length ? (
-            <div className="task-queue-list">
-              {ordered(completedTasks).map((task) => (
-                <TaskQueueCard
-                  key={task.id}
-                  task={task}
-                  lead={leadById.get(task.leadId)}
-                  canManage={false}
-                  currentUserId={user.id}
-                  onComplete={complete}
-                  completed
+          {completedWork.length ? (
+            <>
+              <div className="task-queue-list">
+                {completedWork.map((item) => (
+                  <CompletedWorkCard
+                    key={`${item.kind}:${item.id}`}
+                    item={item}
+                    lead={leadById.get(item.leadId)}
+                  />
+                ))}
+              </div>
+              {completedTotal > 10 && (
+                <PaginationControls
+                  page={completedPage}
+                  totalPages={Math.max(1, Math.ceil(completedTotal / 10))}
+                  total={completedTotal}
+                  busy={completedPageBusy}
+                  onPageChange={loadCompletedPage}
                 />
-              ))}
-            </div>
+              )}
+            </>
           ) : (
             <EmptyState
               icon={CheckCircle2}
-              title="No completed tasks"
-              text="Completed work will appear here after an action is finished."
+              title="No completed work yet"
+              text="Tasks and workflow actions you finish will appear here."
             />
           )}
         </section>
@@ -6192,6 +7361,7 @@ function TaskQueueCard({
   completed?: boolean;
 }) {
   const tab = taskWorkflowTab(task, lead);
+  const workflowAction = task.id.startsWith("workflow:");
   const dueState = taskDueState(task);
   const workflow = lead ? nextStepForLead(lead) : null;
   const reason = taskReason(task, lead);
@@ -6204,7 +7374,7 @@ function TaskQueueCard({
           <span className="checkbox checked" aria-label="Completed">
             <CheckCircle2 size={14} />
           </span>
-        ) : canManage ? (
+        ) : canManage && !workflowAction ? (
           <button
             className="checkbox"
             onClick={() => onComplete(task)}
@@ -6232,7 +7402,9 @@ function TaskQueueCard({
           </span>
           <span>
             Assigned to{" "}
-            {task.assignedTo === currentUserId
+            {workflowAction
+              ? "your role"
+              : task.assignedTo === currentUserId
               ? "you"
               : task.assignedTo.slice(0, 8)}
           </span>
@@ -6244,6 +7416,47 @@ function TaskQueueCard({
           className="button button-secondary task-queue-action"
         >
           {workflow?.label ?? "Open workflow"} <ChevronRight size={15} />
+        </NavLink>
+      )}
+    </article>
+  );
+}
+
+function CompletedWorkCard({
+  item,
+  lead,
+}: {
+  item: CompletedWorkItem;
+  lead?: Lead;
+}) {
+  return (
+    <article className="task-queue-card completed">
+      <div className="task-queue-status">
+        <span className="checkbox checked" aria-label="Completed">
+          <CheckCircle2 size={14} />
+        </span>
+      </div>
+      <div className="task-queue-body">
+        <strong>{item.title}</strong>
+        {lead ? (
+          <NavLink to={`/leads/${lead.id}`} className="task-queue-lead">
+            {lead.fullName} · {pipelineStageLabel(lead.state)}
+          </NavLink>
+        ) : (
+          <span className="task-queue-lead">Franchise opportunity</span>
+        )}
+        <p>{item.detail}</p>
+        <div className="task-queue-meta">
+          <span>Completed {formatDateTime(item.completedAt)}</span>
+          <span>{item.kind === "Workflow" ? "Workflow action" : "Task"}</span>
+        </div>
+      </div>
+      {lead && (
+        <NavLink
+          to={`/leads/${lead.id}`}
+          className="button button-secondary task-queue-action"
+        >
+          Open opportunity <ChevronRight size={15} />
         </NavLink>
       )}
     </article>
@@ -6263,6 +7476,7 @@ function taskDueState(
   return "upcoming";
 }
 function taskDueLabel(task: Task) {
+  if (task.id.startsWith("workflow:")) return "Current workflow action";
   if (!task.dueAt) return "No due date";
   const state = taskDueState(task);
   const date = new Intl.DateTimeFormat("en-PH", {
@@ -6392,6 +7606,331 @@ function QueuePageContent({
   );
 }
 
+function FinanceWorkbench() {
+  const role = session.user?.role;
+  if (!hasRole(role, ["Finance", "Leadership"])) return <Navigate to="/" replace />;
+  const [view, setView] = useState<"action" | "history">("action");
+  const [status, setStatus] = useState("all");
+  const [search, setSearch] = useState("");
+  const [dateRange, setDateRange] = useState("all");
+  const [ownerId, setOwnerId] = useState("");
+  const [owners, setOwners] = useState<{ id: string; displayName: string }[]>([]);
+  const [result, setResult] = useState<FinanceWorkbenchResponse | null>(null);
+  const [page, setPage] = useState(1);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [selectedPaymentId, setSelectedPaymentId] = useState<string | null>(null);
+  const [notice, setNotice] = useState<Notice | null>(null);
+
+  useEffect(() => {
+    api.users.list().then((items) => setOwners(
+      (items as { id: string; displayName: string; role: Role; isActive?: boolean }[])
+        .filter((item) => item.isActive !== false && ["MarketingAgent", "MarketingAdmin"].includes(item.role))
+        .map((item) => ({ id: item.id, displayName: item.displayName })),
+    )).catch(() => setOwners([]));
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const params = new URLSearchParams();
+    params.set("view", view);
+    params.set("status", view === "action" ? "awaiting" : status);
+    params.set("page", String(page));
+    params.set("pageSize", "20");
+    if (search.trim()) params.set("search", search.trim());
+    if (ownerId) params.set("ownerId", ownerId);
+    if (dateRange !== "all") {
+      const days = dateRange === "today" ? 1 : Number(dateRange);
+      params.set("from", new Date(Date.now() - days * 86400000).toISOString());
+      params.set("to", new Date().toISOString());
+    }
+    setLoading(true);
+    setError("");
+    api.finance.workbench(`?${params.toString()}`).then((value) => {
+      if (!cancelled) setResult(value);
+    }).catch((e) => {
+      if (!cancelled) setError(errorMessage(e, "Unable to load the finance workbench."));
+    }).finally(() => {
+      if (!cancelled) setLoading(false);
+    });
+    return () => { cancelled = true; };
+  }, [view, status, search, dateRange, ownerId, page]);
+
+  const changeView = (next: "action" | "history") => {
+    setView(next);
+    setPage(1);
+    if (next === "action") setStatus("all");
+  };
+  const changeFilter = (setter: (value: string) => void, value: string) => {
+    setter(value);
+    setPage(1);
+  };
+  const exportCurrentView = () => {
+    const rows = [
+      ["Lead", "Invoice", "Amount", "Status", "Owner", "Submitted", "Confirmed"],
+      ...(result?.items ?? []).map((item) => [
+        item.leadName,
+        item.invoiceNumber ?? "",
+        `${item.currency} ${item.amount.toFixed(2)}`,
+        financeStatusLabel(item.status),
+        item.ownerName,
+        item.submittedAt ? formatDateTime(item.submittedAt) : "",
+        item.confirmedAt ? formatDateTime(item.confirmedAt) : "",
+      ]),
+    ];
+    const csv = rows.map((row) => row.map((cell) => `"${cell.replaceAll('"', '""')}"`).join(",")).join("\n");
+    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `finance-${view}-${new Date().toISOString().slice(0, 10)}.csv`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  };
+  const totalPages = Math.max(1, Math.ceil((result?.total ?? 0) / (result?.pageSize ?? 20)));
+  const items = result?.items ?? [];
+  const subtitle = view === "action"
+    ? "Review submitted payments before the franchise workflow can continue."
+    : "Find every submitted payment and see who confirmed it, when, and why.";
+
+  return (
+    <Page title="Finance" subtitle={subtitle}>
+      {notice && <NoticeBar notice={notice} onClose={() => setNotice(null)} />}
+      <div className="finance-metrics">
+        <FinanceMetric label="Awaiting review" value={String(result?.awaitingCount ?? 0)} hint="Submitted packages" tone="amber" icon={Clock3} />
+        <FinanceMetric label="Pending amount" value={formatMoney(result?.pendingAmount ?? 0)} hint="Awaiting confirmation" tone="red" icon={WalletCards} />
+        <FinanceMetric label="Confirmed this month" value={formatMoney(result?.confirmedThisMonth ?? 0)} hint="Confirmed collections" tone="green" icon={CheckCircle2} />
+        <FinanceMetric label="Exceptions" value={String(result?.exceptionCount ?? 0)} hint="Returned or cancelled" tone="slate" icon={AlertTriangle} />
+      </div>
+      <section className="panel finance-workbench-panel">
+        <div className="finance-workbench-header"><div><h2>Payment operations</h2><p>Keep payment review and payment history in one auditable workspace.</p></div>{view === "history" && <button className="button button-secondary" onClick={exportCurrentView} disabled={!items.length}><FileText size={15} /> Export</button>}</div>
+        <div className="queue-view-tabs finance-view-tabs" role="tablist" aria-label="Finance view">
+          <button className={view === "action" ? "active" : ""} role="tab" aria-selected={view === "action"} onClick={() => changeView("action")}>Action required <span>{result?.awaitingCount ?? 0}</span></button>
+          <button className={view === "history" ? "active" : ""} role="tab" aria-selected={view === "history"} onClick={() => changeView("history")}>Payment history</button>
+        </div>
+        <div className="finance-toolbar">
+          <label className="finance-search"><Search size={16} /><input value={search} onChange={(event) => changeFilter(setSearch, event.target.value)} placeholder="Search lead or invoice…" /></label>
+          <label><span>Status</span><select value={view === "action" ? "awaiting" : status} disabled={view === "action"} onChange={(event) => changeFilter(setStatus, event.target.value)}><option value="all">All statuses</option><option value="awaiting">Awaiting review</option><option value="confirmed">Confirmed</option><option value="returned">Returned</option><option value="cancelled">Cancelled</option></select></label>
+          <label><span>Date</span><select value={dateRange} onChange={(event) => changeFilter(setDateRange, event.target.value)}><option value="all">All dates</option><option value="today">Today</option><option value="7">Last 7 days</option><option value="30">Last 30 days</option><option value="90">Last 90 days</option></select></label>
+          <label><span>Owner</span><select value={ownerId} onChange={(event) => changeFilter(setOwnerId, event.target.value)}><option value="">All owners</option>{owners.map((owner) => <option key={owner.id} value={owner.id}>{owner.displayName}</option>)}</select></label>
+        </div>
+        {error && <div className="form-error">{error}</div>}
+        {loading ? <Loading /> : items.length ? <><div className="finance-table-wrap"><div className="finance-table finance-table-heading"><span>Lead / franchise</span><span>Invoice</span><span>Amount</span><span>Submitted</span><span>Age</span><span>Status</span><span /></div>{items.map((item) => <FinancePaymentRow key={item.paymentId} item={item} onOpen={() => setSelectedPaymentId(item.paymentId)} />)}</div><FinancePagination page={page} totalPages={totalPages} total={result?.total ?? 0} onChange={setPage} /></> : <div className="finance-empty"><CheckCircle2 size={22} /><strong>{view === "action" ? "No payments awaiting review" : "No payment history matches"}</strong><span>{view === "action" ? "New submitted payment packages will appear here." : "Try a different search, status, owner, or date filter."}</span></div>}
+      </section>
+      {selectedPaymentId && <FinancePaymentDrawer paymentId={selectedPaymentId} onClose={() => setSelectedPaymentId(null)} onConfirmed={() => { setSelectedPaymentId(null); setNotice({ message: "Payment confirmed and the finance history was updated.", tone: "success" }); setPage(1); }} />}
+    </Page>
+  );
+}
+
+function FinanceMetric({ label, value, hint, tone, icon: IconComponent }: { label: string; value: string; hint: string; tone: string; icon: Icon }) {
+  return <div className="finance-metric"><div className={`finance-metric-icon ${tone}`}><IconComponent size={17} /></div><div><span>{label}</span><strong>{value}</strong><small>{hint}</small></div></div>;
+}
+
+function FinancePaymentRow({ item, onOpen }: { item: FinancePaymentItem; onOpen: () => void }) {
+  const age = paymentAge(item.activityAt);
+  return <button className="finance-table finance-table-row" onClick={onOpen} type="button"><span className="finance-lead-cell"><span className="avatar avatar-tiny">{initials(item.leadName)}</span><span><strong>{item.leadName}</strong><small>{item.location ?? "Location not provided"} · {item.ownerName}</small></span></span><span className="finance-invoice-cell">{item.invoiceNumber ?? "—"}</span><span className="finance-amount-cell">{formatMoney(item.amount, item.currency)}</span><span>{item.submittedAt ? formatDate(item.submittedAt) : "—"}</span><span className={`finance-age ${age.tone}`}>{age.label}</span><span><span className={`finance-status ${item.status.toLowerCase()}`}>{financeStatusLabel(item.status)}</span></span><ChevronRight size={16} /></button>;
+}
+
+function FinancePagination({ page, totalPages, total, onChange }: { page: number; totalPages: number; total: number; onChange: (page: number) => void }) {
+  if (total <= 0) return null;
+  return <div className="finance-pagination"><span>Showing {(page - 1) * 20 + 1}–{Math.min(page * 20, total)} of {total}</span><div><button className="button button-secondary" disabled={page <= 1} onClick={() => onChange(page - 1)}>Previous</button><span>Page {page} of {totalPages}</span><button className="button button-secondary" disabled={page >= totalPages} onClick={() => onChange(page + 1)}>Next</button></div></div>;
+}
+
+function FinancePaymentDrawer({ paymentId, onClose, onConfirmed }: { paymentId: string; onClose: () => void; onConfirmed: () => void }) {
+  const [detail, setDetail] = useState<FinancePaymentDetail | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [reference, setReference] = useState("");
+  const [error, setError] = useState("");
+  useEffect(() => {
+    const escape = (event: KeyboardEvent) => event.key === "Escape" && onClose();
+    window.addEventListener("keydown", escape);
+    return () => window.removeEventListener("keydown", escape);
+  }, [onClose]);
+  useEffect(() => {
+    setError("");
+    setLoading(true);
+    api.finance.payment(paymentId).then(setDetail).catch((e) => setError(errorMessage(e, "Unable to load payment details."))).finally(() => setLoading(false));
+  }, [paymentId]);
+  const refreshDetail = async () => {
+    try {
+      setDetail(await api.finance.payment(paymentId));
+    } catch (e) {
+      setError(errorMessage(e, "Unable to refresh payment details."));
+    }
+  };
+  const openDocument = async (document: DocumentItem) => {
+    try {
+      const result = await api.leads.downloadUrl(document.leadId, document.id) as { downloadUrl?: string };
+      if (result.downloadUrl) window.open(result.downloadUrl, "_blank", "noopener,noreferrer");
+    } catch (e) { setError(errorMessage(e, "Unable to open the payment proof.")); }
+  };
+  const openInvoice = async () => {
+    if (!detail) return;
+    try {
+      const result = await api.leads.invoiceDownload(detail.payment.leadId);
+      window.open(result.downloadUrl, "_blank", "noopener,noreferrer");
+    } catch (e) { setError(errorMessage(e, "Unable to open the invoice.")); }
+  };
+  const confirm = async () => {
+    if (!detail || !reference.trim()) { setError("Enter the payment reference before confirming."); return; }
+    setBusy(true); setError("");
+    try {
+      await api.leads.confirmPayment(detail.payment.leadId, { referenceNumber: reference.trim(), amount: detail.payment.amount, currency: detail.payment.currency, paidAt: new Date().toISOString() });
+      onConfirmed();
+    } catch (e) { setError(errorMessage(e, "Unable to confirm this payment.")); } finally { setBusy(false); }
+  };
+  const canAttachProof = detail?.payment.status === "Awaiting" && session.user?.role === "Finance";
+  return (
+    <div
+      className="finance-drawer-backdrop"
+      role="presentation"
+      onMouseDown={(event) => event.target === event.currentTarget && onClose()}
+    >
+      <aside
+        className="finance-drawer"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="finance-drawer-title"
+      >
+        <div className="finance-drawer-header">
+          <div>
+            <span className="eyebrow">PAYMENT RECORD</span>
+            <h2 id="finance-drawer-title">
+              {loading ? "Loading payment…" : detail?.payment.invoiceNumber ?? "Payment details"}
+            </h2>
+            {detail && (
+              <p>
+                {detail.payment.leadName} · {formatMoney(detail.payment.amount, detail.payment.currency)}
+              </p>
+            )}
+          </div>
+          <button className="icon-button" onClick={onClose} aria-label="Close payment details">
+            <X size={18} />
+          </button>
+        </div>
+        {error && <div className="form-error">{error}</div>}
+        {loading ? (
+          <Loading />
+        ) : detail ? (
+          <>
+            <div className="finance-drawer-status">
+              <span className={`finance-status ${detail.payment.status.toLowerCase()}`}>
+                {financeStatusLabel(detail.payment.status)}
+              </span>
+              <span>{detail.payment.location ?? "Location not provided"}</span>
+            </div>
+            <div className="finance-drawer-section">
+              <h3>Payment timeline</h3>
+              <div className="finance-timeline">
+                {detail.events.length ? (
+                  detail.events.map((event) => (
+                    <div className="finance-timeline-item" key={event.id}>
+                      <i />
+                      <div>
+                        <strong>{financeEventLabel(event.type)}</strong>
+                        <p>{event.message}</p>
+                        <small>{formatDateTime(event.createdAt)} · {event.actorName}</small>
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <span className="muted">No payment events recorded yet.</span>
+                )}
+              </div>
+            </div>
+            <div className="finance-drawer-section">
+              <h3>Documents</h3>
+              <div className="finance-proof-list">
+                <button className="finance-proof" onClick={openInvoice} type="button">
+                  <FileText size={16} />
+                  <span>
+                    <strong>{detail.payment.invoiceNumber ?? "Down payment invoice"}</strong>
+                    <small>Invoice</small>
+                  </span>
+                  <ArrowUpRight size={14} />
+                </button>
+                {!canAttachProof && detail.evidenceDocuments.length
+                  ? detail.evidenceDocuments.map((document) => (
+                      <button className="finance-proof" key={document.id} onClick={() => openDocument(document)} type="button">
+                        <FileText size={16} />
+                        <span>
+                          <strong>{document.fileName}</strong>
+                          <small>Payment proof · {Math.ceil(document.sizeBytes / 1024)} KB</small>
+                        </span>
+                        <ArrowUpRight size={14} />
+                      </button>
+                    ))
+                  : null}
+                {!canAttachProof && !detail.evidenceDocuments.length ? (
+                  <div className="finance-proof-empty">No payment proof attached.</div>
+                ) : null}
+              </div>
+              {canAttachProof ? (
+                <div className="finance-proof-upload">
+                  <strong>Attach payment proof</strong>
+                  <span>Upload a receipt, bank confirmation, or other proof before confirming.</span>
+                  <DocumentsPanel
+                    lead={{ id: detail.payment.leadId }}
+                    onNotice={(notice) => setError(notice.tone === "error" ? notice.message : "")}
+                    onDocumentsChanged={refreshDetail}
+                    embedded
+                    fixedDocumentType="PAYMENT_RECEIPT"
+                    visibleTypes={["PAYMENT_RECEIPT"]}
+                    documentCard
+                    hideEmptyState
+                  />
+                </div>
+              ) : null}
+            </div>
+            {detail.payment.confirmationReference && (
+              <div className="finance-reference">
+                <span>Confirmation reference</span>
+                <strong>{detail.payment.confirmationReference}</strong>
+                {detail.payment.confirmedByName && (
+                  <small>
+                    Confirmed by {detail.payment.confirmedByName}
+                    {detail.payment.confirmedAt ? ` · ${formatDateTime(detail.payment.confirmedAt)}` : ""}
+                  </small>
+                )}
+              </div>
+            )}
+            {detail.payment.status === "Awaiting" && (
+              <div className="finance-confirm-box">
+                <h3>Confirm payment</h3>
+                <p>Match the invoice, payment proof, and received amount before recording confirmation.</p>
+                <label>
+                  Payment reference
+                  <input value={reference} onChange={(event) => setReference(event.target.value)} placeholder="Bank or receipt reference" />
+                </label>
+                <button className="button button-primary button-wide" onClick={confirm} disabled={busy}>
+                  {busy ? "Confirming…" : "Confirm payment"}
+                </button>
+              </div>
+            )}
+          </>
+        ) : null}
+      </aside>
+    </div>
+  );
+}
+
+function financeStatusLabel(status: string) {
+  return status === "Awaiting" ? "Awaiting review" : status === "Confirmed" ? "Confirmed" : statusLabel(status);
+}
+function financeEventLabel(type: string) {
+  return type === "InvoiceGenerated" ? "Payment invoice generated" : type === "DownPaymentSubmittedForFinance" ? "Payment submitted to Finance" : type === "PaymentConfirmed" ? "Payment confirmed" : statusLabel(type);
+}
+function paymentAge(value: string) {
+  const hours = Math.max(0, Math.floor((Date.now() - Date.parse(value)) / 3600000));
+  if (hours < 1) return { label: "<1h", tone: "fresh" };
+  if (hours < 24) return { label: `${hours}h`, tone: "fresh" };
+  const days = Math.floor(hours / 24);
+  return { label: `${days}d`, tone: days >= 3 ? "old" : "watch" };
+}
+function formatMoney(value: number, currency = "PHP") {
+  return new Intl.NumberFormat("en-PH", { style: "currency", currency, maximumFractionDigits: 0 }).format(value);
+}
+
 function PreLaunchQueue() {
   if (session.user?.role === "AdminTeam") return <EndorsementsQueue />;
   if (
@@ -6420,13 +7959,13 @@ function PreLaunchQueueContent() {
   }, []);
   return (
     <Page
-      title="Pre-launch readiness"
-      subtitle="Turn an approved opportunity into a branch ready to open."
+      title="Signed agreements & pre-launch"
+      subtitle="Review fully signed agreements before explicitly starting readiness work."
     >
       <section className="panel queue-panel">
         <PanelHeader
-          title="Ready to prepare"
-          subtitle="Product-specific checklists keep launch work visible."
+          title="Ready for the next step"
+          subtitle="A signed agreement must be reviewed before its pre-launch checklist starts."
         />
         {items.length ? (
           <div className="queue-list">
@@ -6440,7 +7979,7 @@ function PreLaunchQueueContent() {
                 <div>
                   <strong>{item.fullName}</strong>
                   <span>
-                    {item.state === "ContractSigned" ? "Start checklist" : "Open checklist"} · Updated {formatDate(item.updatedAt)}
+                    {item.state === "ContractSigned" ? "Review signed agreement" : "Open pre-launch checklist"} · Updated {formatDate(item.updatedAt)}
                   </span>
                 </div>
                 <ChevronRight size={17} />
@@ -6450,8 +7989,8 @@ function PreLaunchQueueContent() {
         ) : (
           <EmptyState
             icon={ClipboardCheck}
-            title="No pre-launch opportunities yet"
-            text="Qualified opportunities will appear here when they reach readiness."
+            title="No signed agreements awaiting review"
+            text="Fully signed opportunities will appear here before their pre-launch checklist starts."
           />
         )}
       </section>
@@ -6573,242 +8112,194 @@ function Reports() {
   return <ReportsContent />;
 }
 function ReportsContent() {
-  const [report, setReport] = useState<{
-    totalLeads: number;
-    byState: Record<string, number>;
-    confirmedDownPayments: number;
-  } | null>(null);
-  const [conversion, setConversion] = useState<Record<string, number>>({});
-  const [goal, setGoal] = useState<{
-    year: number;
-    target: number;
-    achieved: number;
-    completionPercentage: number;
-  } | null>(null);
-  const [leaderboard, setLeaderboard] = useState<
-    {
-      agentId: string;
-      agentName: string;
-      leads: number;
-      qualified: number;
-      endorsed: number;
-    }[]
-  >([]);
-  const [payments, setPayments] = useState<{
-    totalInvoiced: number;
-    totalConfirmed: number;
-    pendingCount: number;
-  } | null>(null);
+  type Overview = { totalLeads: number; byState: Record<string, number>; confirmedDownPayments: number };
+  type Conversion = { rates: Record<string, number>; from: string; to: string };
+  type Goal = { year: number; target: number; achieved: number; completionPercentage: number };
+  type Payment = { totalInvoiced: number; totalConfirmed: number; pendingCount: number; pendingAmount?: number };
+  type AgentRow = { agentId: string; agentName: string; leads: number; qualified: number; endorsed: number; confirmedRevenue?: number };
+  type ReportingPeriod = "current" | "previous" | "year";
+  const [period, setPeriod] = useState<ReportingPeriod>("current");
+  const [agentId, setAgentId] = useState("");
+  const [agents, setAgents] = useState<{ id: string; displayName: string; role: string; isActive: boolean }[]>([]);
+  const [report, setReport] = useState<Overview | null>(null);
+  const [previousReport, setPreviousReport] = useState<Overview | null>(null);
+  const [conversion, setConversion] = useState<Conversion | null>(null);
+  const [previousConversion, setPreviousConversion] = useState<Conversion | null>(null);
+  const [goal, setGoal] = useState<Goal | null>(null);
+  const [leaderboard, setLeaderboard] = useState<AgentRow[]>([]);
+  const [payments, setPayments] = useState<Payment | null>(null);
+  const [previousPayments, setPreviousPayments] = useState<Payment | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  const getPeriod = (value: ReportingPeriod) => {
+    const now = new Date();
+    if (value === "year")
+      return { from: new Date(now.getFullYear(), 0, 1), to: new Date(now.getFullYear(), 11, 31, 23, 59, 59, 999) };
+    const offset = value === "previous" ? -1 : 0;
+    const from = new Date(now.getFullYear(), now.getMonth() + offset, 1);
+    const to = new Date(now.getFullYear(), now.getMonth() + offset + 1, 0, 23, 59, 59, 999);
+    return { from, to };
+  };
+  const queryFor = (value: ReportingPeriod, selectedAgent = agentId) => {
+    const range = getPeriod(value);
+    return `?from=${encodeURIComponent(range.from.toISOString())}&to=${encodeURIComponent(range.to.toISOString())}${selectedAgent ? `&agentId=${encodeURIComponent(selectedAgent)}` : ""}`;
+  };
+  const labelForPeriod = (value: ReportingPeriod) => {
+    const range = getPeriod(value);
+    const monthFormatter = new Intl.DateTimeFormat("en-PH", { month: "short" });
+    const month = monthFormatter.format(range.from);
+    if (range.from.getFullYear() === range.to.getFullYear() && range.from.getMonth() === range.to.getMonth())
+      return `${month} ${range.from.getDate()}–${range.to.getDate()}, ${range.from.getFullYear()}`;
+    const formatter = new Intl.DateTimeFormat("en-PH", { month: "short", day: "numeric", year: "numeric" });
+    return `${formatter.format(range.from)} – ${formatter.format(range.to)}`;
+  };
   useEffect(() => {
+    api.users.list().then((value) => setAgents((value as { id: string; displayName: string; role: string; isActive: boolean }[]).filter((item) => item.isActive && ["MarketingAgent", "MarketingAdmin"].includes(item.role)))).catch(() => undefined);
+  }, []);
+  useEffect(() => {
+    setLoading(true);
+    setError("");
+    const currentQuery = queryFor(period);
+    const previousQuery = queryFor("previous");
+    const goalQuery = agentId ? `?agentId=${encodeURIComponent(agentId)}` : "";
     if (session.user?.role === "Finance") {
-      api.reports
-        .downPayments()
-        .then((value) => setPayments(value as typeof payments))
-        .catch(() => undefined);
+      api.reports.downPayments(currentQuery).then((value) => setPayments(value as Payment)).catch((e) => setError(errorMessage(e, "Unable to load finance reports."))).finally(() => setLoading(false));
       return;
     }
     Promise.all([
-      api.reports.overview(),
-      api.reports.conversion(),
-      api.reports.goals(),
-      api.reports.leaderboard(),
-      api.reports.downPayments(),
-    ])
-      .then(
-        ([
-          overview,
-          conversionResult,
-          goalResult,
-          leaderboardResult,
-          paymentResult,
-        ]) => {
-          setReport(overview as typeof report);
-          setConversion(
-            (conversionResult as { rates: Record<string, number> }).rates,
-          );
-          setGoal(goalResult as typeof goal);
-          setLeaderboard(leaderboardResult as typeof leaderboard);
-          setPayments(paymentResult as typeof payments);
-        },
-      )
-      .catch(() => undefined);
-  }, []);
-  if (session.user?.role === "Finance")
-    return (
-      <Page
-        title="Finance reports"
-        subtitle="Down-payment invoicing and confirmation status."
-      >
-        <section className="metric-grid report-metrics">
-          <Metric
-            label="Total invoiced"
-            value={
-              payments ? `₱${payments.totalInvoiced.toLocaleString()}` : "—"
-            }
-            hint="Issued invoices"
-            icon={FileText}
-            tone="blue"
-          />
-          <Metric
-            label="Total confirmed"
-            value={
-              payments ? `₱${payments.totalConfirmed.toLocaleString()}` : "—"
-            }
-            hint="Verified receipts"
-            icon={WalletCards}
-            tone="green"
-          />
-          <Metric
-            label="Waiting for confirmation"
-            value={payments ? String(payments.pendingCount) : "—"}
-            hint="Finance queue"
-            icon={Clock3}
-            tone="amber"
-          />
-        </section>
-      </Page>
-    );
+      api.reports.overview(currentQuery),
+      api.reports.conversion(currentQuery),
+      api.reports.goals(goalQuery),
+      api.reports.leaderboard(currentQuery),
+      api.reports.downPayments(currentQuery),
+      api.reports.overview(previousQuery),
+      api.reports.conversion(previousQuery),
+      api.reports.downPayments(previousQuery),
+    ]).then(([overview, conversionResult, goalResult, leaderboardResult, paymentResult, previousOverview, previousConversionResult, previousPaymentResult]) => {
+      setReport(overview as Overview);
+      setConversion(conversionResult as Conversion);
+      setGoal(goalResult as Goal);
+      setLeaderboard(leaderboardResult as AgentRow[]);
+      setPayments(paymentResult as Payment);
+      setPreviousReport(previousOverview as Overview);
+      setPreviousConversion(previousConversionResult as Conversion);
+      setPreviousPayments(previousPaymentResult as Payment);
+    }).catch((e) => setError(errorMessage(e, "Unable to load reports."))).finally(() => setLoading(false));
+  }, [period, agentId]);
+
+  const money = (value?: number | null) => value == null ? "—" : `₱${value.toLocaleString("en-PH", { maximumFractionDigits: 0 })}`;
+  const delta = (current?: number, previous?: number) => {
+    if (current == null || previous == null) return "";
+    const change = current - previous;
+    return `${change >= 0 ? "↑" : "↓"} ${Math.abs(change).toLocaleString()} vs previous month`;
+  };
+  const rate = conversion?.rates ?? {};
+  const reached = (key: string) => report?.totalLeads ? Math.round(report.totalLeads * (rate[key] ?? 0) / 100) : 0;
+  const funnel = [
+    ["New", "New leads"],
+    ["Inquiry", "Inquiry"],
+    ["Nurturing", "Nurturing"],
+    ["DownPaymentPending", "Invoice & Documents"],
+    ["ContractReview", "Contract Review"],
+    ["ContractSigned", "Contract Signed"],
+    ["EndorsedToAdmin", "Endorsed"],
+  ].map(([key, label]) => ({ key, label, count: reached(key), percent: rate[key] ?? 0 }));
+  const largestDrop = funnel.slice(1).reduce((largest, current, index) => {
+    const prior = funnel[index];
+    const loss = prior.count - current.count;
+    return loss > largest.loss ? { from: prior, to: current, loss } : largest;
+  }, { from: funnel[0], to: funnel[1], loss: 0 });
+  const goalTarget = goal?.target ?? 0;
+  const goalAchieved = goal?.achieved ?? 0;
+  const elapsedMonths = Math.max(1, new Date().getMonth());
+  const expectedByNow = Math.round(goalTarget * elapsedMonths / 12);
+  const remainingMonths = Math.max(1, 12 - elapsedMonths);
+  const goalBehind = Math.max(0, expectedByNow - goalAchieved);
+  const collectionRate = payments && payments.totalInvoiced > 0 ? Math.round(payments.totalConfirmed / payments.totalInvoiced * 100) : 0;
+  const revenueDelta = payments && previousPayments ? delta(payments.totalConfirmed, previousPayments.totalConfirmed) : "";
+  const conversionDelta = conversion && previousConversion ? delta(rate.ContractReview, previousConversion.rates.ContractReview) : "";
+  const insights = [
+    goalTarget > 0 && goalAchieved === 0 ? { tone: "danger", title: `No franchises endorsed yet`, detail: `0 of ${goalTarget} annual target completed.` } : null,
+    largestDrop.loss > 0 ? { tone: "warning", title: `${largestDrop.loss} opportunities stalled before ${largestDrop.to.label}`, detail: `Review pending work between ${largestDrop.from.label} and ${largestDrop.to.label}.` } : null,
+    payments && payments.totalInvoiced > 0 && payments.totalConfirmed === payments.totalInvoiced ? { tone: "success", title: "All invoiced payments have been collected", detail: `${money(payments.totalInvoiced)} invoiced · ${money(payments.totalConfirmed)} confirmed.` } : null,
+  ].filter(Boolean) as { tone: "danger" | "warning" | "success"; title: string; detail: string }[];
+  const groupedConversion = [
+    ["Lead acquisition", "New", "Inquiry"],
+    ["Qualification", "Inquiry", "Qualified"],
+    ["Commercial", "Qualified", "DownPaymentPending"],
+    ["Contracting", "DownPaymentPending", "ContractReview"],
+    ["Contracting", "ContractReview", "ContractSigned"],
+    ["Franchise launch", "ContractSigned", "EndorsedToAdmin"],
+  ].map(([group, from, to]) => {
+    const fromCount = reached(from);
+    const toCount = reached(to);
+    return { group, from, to, fromCount, toCount, percentage: fromCount ? Math.round(toCount / fromCount * 100) : 0 };
+  });
+  const topPerformer = leaderboard[0];
+  if (loading) return <Page title="Reports" subtitle="Preparing an operational view of performance and next actions."><Loading /></Page>;
+  if (error) return <Page title="Reports" subtitle={error}><button className="button button-secondary" onClick={() => window.location.reload()}>Try again</button></Page>;
+  if (session.user?.role === "Finance") return (
+    <Page title="Finance reports" subtitle="Collection performance and payment risk.">
+      <ReportContext period={period} setPeriod={setPeriod} agentId={agentId} setAgentId={setAgentId} agents={agents} label={labelForPeriod(period)} />
+      <PaymentPerformance payments={payments} />
+    </Page>
+  );
   return (
-    <Page
-      title="Reports"
-      subtitle="A grounded view of growth, conversion, and readiness."
-    >
-      <section className="metric-grid report-metrics">
-        <Metric
-          label="Total leads"
-          value={report ? String(report.totalLeads) : "—"}
-          hint="Current workspace"
-          icon={UsersRound}
-          tone="red"
-        />
-        <Metric
-          label="Confirmed payments"
-          value={
-            report ? `₱${report.confirmedDownPayments.toLocaleString()}` : "—"
-          }
-          hint="Finance confirmed"
-          icon={WalletCards}
-          tone="green"
-        />
-        <Metric
-          label="Pipeline stages"
-          value={report ? String(Object.keys(report.byState).length) : "—"}
-          hint="Active states"
-          icon={Activity}
-          tone="blue"
-        />
+    <Page title="Reports" subtitle="Performance, bottlenecks, and the actions that move the franchise operation forward.">
+      <ReportContext period={period} setPeriod={setPeriod} agentId={agentId} setAgentId={setAgentId} agents={agents} label={labelForPeriod(period)} />
+      <section className="metric-grid report-metrics report-metrics-four">
+        <Metric label="Total leads" value={report ? String(report.totalLeads) : "—"} hint={delta(report?.totalLeads, previousReport?.totalLeads)} icon={UsersRound} tone="red" />
+        <Metric label="Confirmed revenue" value={money(payments?.totalConfirmed ?? report?.confirmedDownPayments)} hint={`${payments ? `${collectionRate}% collected` : "Finance confirmed"}${revenueDelta ? ` · ${revenueDelta}` : ""}`} icon={WalletCards} tone="green" />
+        <Metric label="Overall conversion" value={`${rate.ContractReview ?? 0}%`} hint={`${reached("ContractReview")} of ${report?.totalLeads ?? 0} reached Contract Review${conversionDelta ? ` · ${conversionDelta}` : ""}`} icon={Activity} tone="blue" />
+        <Metric label={`${goal?.year ?? new Date().getFullYear()} goal`} value={`${goalAchieved} / ${goalTarget} endorsed`} hint={`${Math.max(0, goalTarget - goalAchieved)} remaining · ${remainingMonths} months left`} icon={CheckCircle2} tone="amber" />
       </section>
+      <section className="panel report-panel report-insights">
+        <PanelHeader title="Insights requiring attention" subtitle="Signals worth acting on this reporting period." />
+        <div className="insight-list">
+          {insights.map((item) => <div className={`report-insight ${item.tone}`} key={item.title}><span>{item.tone === "success" ? "✓" : "!"}</span><div><strong>{item.title}</strong><small>{item.detail}</small></div></div>)}
+          {!insights.length && <div className="report-insight success"><span>✓</span><div><strong>No immediate bottleneck detected</strong><small>Keep monitoring the next stage transition and collection rate.</small></div></div>}
+        </div>
+      </section>
+      <div className="report-two-column">
+        <section className="panel report-panel funnel-panel">
+          <PanelHeader title="Pipeline funnel" subtitle="Cumulative opportunities that reached each milestone." />
+          <div className="funnel-list">
+            {funnel.map((item, index) => <div className="funnel-step" key={item.key}><div className="funnel-step-label"><strong>{item.count}</strong><span>{item.label}</span><em>{item.percent}%</em></div><div className="funnel-track"><i style={{ width: `${Math.max(item.percent, item.count ? 4 : 0)}%` }} /></div>{index < funnel.length - 1 && <div className="funnel-arrow">↓</div>}</div>)}
+          </div>
+          {largestDrop.loss > 0 && <div className="bottleneck-callout"><AlertTriangle size={16} /><span><strong>Largest drop-off: {largestDrop.from.label} → {largestDrop.to.label}</strong>{Math.round(largestDrop.loss / Math.max(1, largestDrop.from.count) * 100)}% of opportunities are stalled or lost here.</span></div>}
+        </section>
+        <section className="panel report-panel goal-panel">
+          <PanelHeader title={`${goal?.year ?? new Date().getFullYear()} franchise goal`} subtitle="Are endorsements on pace for the annual target?" />
+          <div className="goal-progress-heading"><strong>{goalAchieved} / {goalTarget} endorsed</strong><span>{goal?.completionPercentage ?? 0}%</span></div>
+          <div className="goal-progress-track"><i style={{ width: `${Math.min(100, goal?.completionPercentage ?? 0)}%` }} /></div>
+          <div className="goal-pace-grid"><Info label="Target pace by now" value={String(expectedByNow)} /><Info label="Actual" value={String(goalAchieved)} /><Info label="Behind target" value={String(goalBehind)} /></div>
+          <div className="goal-required-pace"><span>Required pace</span><strong>{Math.ceil(Math.max(0, goalTarget - goalAchieved) / remainingMonths)} endorsements/month</strong><small>to hit the annual target</small></div>
+        </section>
+      </div>
       <section className="panel report-panel">
-        <PanelHeader
-          title="Pipeline distribution"
-          subtitle="Use reports to spot friction before it becomes a bottleneck."
-        />
-        {report ? (
-          Object.entries(report.byState).map(([state, count]) => (
-            <div className="report-row" key={state}>
-              <span>{labelForState(state as LeadState)}</span>
-              <div className="report-track">
-                <i
-                  style={{
-                    width: `${Math.max(6, (count / Math.max(1, report.totalLeads)) * 100)}%`,
-                  }}
-                />
-              </div>
-              <strong>{count}</strong>
-            </div>
-          ))
-        ) : (
-          <Loading />
-        )}
+        <PanelHeader title="Conversion by stage" subtitle="Grouped transitions make the weak handoff visible." />
+        <div className="conversion-groups">{groupedConversion.map((item) => <div className="conversion-group" key={`${item.from}-${item.to}`}><span>{item.group}</span><strong>{labelForState(item.from as LeadState)} → {labelForState(item.to as LeadState)}</strong><div className="report-track"><i className={item.percentage < 50 ? "weak" : ""} style={{ width: `${Math.max(2, item.percentage)}%` }} /></div><em>{item.percentage}% <small>({item.toCount} / {item.fromCount})</small></em></div>)}</div>
       </section>
-      <div className="detail-grid">
+      <div className="report-two-column">
         <section className="panel report-panel">
-          <PanelHeader
-            title="Stage conversion"
-            subtitle="Percentage of created leads that reached each milestone."
-          />
-          {Object.entries(conversion).map(([state, rate]) => (
-            <div className="report-row" key={state}>
-              <span>{labelForState(state as LeadState)}</span>
-              <div className="report-track">
-                <i style={{ width: `${Math.max(2, rate)}%` }} />
-              </div>
-              <strong>{rate}%</strong>
-            </div>
-          ))}
-        </section>
-        <section className="panel">
-          <PanelHeader
-            title={`${goal?.year ?? new Date().getFullYear()} annual goal`}
-            subtitle="Endorsed franchisees against the configured annual target."
-          />
-          <div className="metric-grid report-metrics">
-            <Metric
-              label="Target"
-              value={goal ? String(goal.target) : "—"}
-              hint="Annual target"
-              icon={Activity}
-              tone="blue"
-            />
-            <Metric
-              label="Endorsed"
-              value={goal ? String(goal.achieved) : "—"}
-              hint="Completed handoffs"
-              icon={CheckCircle2}
-              tone="green"
-            />
-            <Metric
-              label="Progress"
-              value={goal ? `${goal.completionPercentage}%` : "—"}
-              hint="Goal completion"
-              icon={Sparkles}
-              tone="red"
-            />
-          </div>
-        </section>
-        <section className="panel">
-          <PanelHeader
-            title="Agent leaderboard"
-            subtitle="Assigned pipeline, qualified opportunities, and completed endorsements."
-          />
-          <div className="lead-table">
-            {leaderboard.map((item) => (
-              <div className="lead-table-row" key={item.agentId}>
-                <strong>{item.agentName}</strong>
-                <span>{item.leads} leads</span>
-                <span>{item.qualified} qualified</span>
-                <span>{item.endorsed} endorsed</span>
-              </div>
-            ))}
-          </div>
-        </section>
-        <section className="panel">
-          <PanelHeader
-            title="Down-payment status"
-            subtitle="Invoice and Finance confirmation totals."
-          />
-          <div className="snapshot-grid">
-            <Info
-              label="Invoiced"
-              value={
-                payments ? `₱${payments.totalInvoiced.toLocaleString()}` : "—"
-              }
-            />
-            <Info
-              label="Confirmed"
-              value={
-                payments ? `₱${payments.totalConfirmed.toLocaleString()}` : "—"
-              }
-            />
-            <Info
-              label="Pending confirmation"
-              value={payments ? String(payments.pendingCount) : "—"}
-            />
-          </div>
-        </section>
+          <PanelHeader title="Agent performance" subtitle="Productivity, conversion, and confirmed revenue." />
+          <div className="report-table"><div className="report-table-row report-table-heading"><span>Agent</span><span>Leads</span><span>Qualified</span><span>Conversion</span><span>Revenue</span><span>Endorsed</span></div>{leaderboard.map((item) => <div className="report-table-row" key={item.agentId}><strong>{item.agentName}</strong><span>{item.leads}</span><span>{item.qualified}</span><span className={item.leads && item.qualified / item.leads < .5 ? "weak-text" : ""}>{item.leads ? `${Math.round(item.qualified / item.leads * 100)}%` : "0%"}</span><span>{money(item.confirmedRevenue ?? 0)}</span><span>{item.endorsed}</span></div>)}</div>{topPerformer && <div className="top-performer"><CheckCircle2 size={15} /><span><strong>Top performer: {topPerformer.agentName}</strong>{topPerformer.qualified} qualified opportunities · {money(topPerformer.confirmedRevenue ?? 0)} confirmed</span></div>}</section>
+        <PaymentPerformance payments={payments} />
       </div>
     </Page>
   );
+}
+
+function ReportContext({ period, setPeriod, agentId, setAgentId, agents, label }: { period: "current" | "previous" | "year"; setPeriod: (value: "current" | "previous" | "year") => void; agentId: string; setAgentId: (value: string) => void; agents: { id: string; displayName: string; role: string; isActive: boolean }[]; label: string }) {
+  return <section className="report-context"><div><span className="eyebrow">REPORTING PERIOD</span><strong>{label}</strong></div><label><span>Period</span><select value={period} onChange={(event) => setPeriod(event.target.value as "current" | "previous" | "year")}><option value="current">This month</option><option value="previous">Previous month</option><option value="year">Year to date</option></select></label><label><span>Branch</span><select disabled><option>All branches</option></select></label><label><span>Agent</span><select value={agentId} onChange={(event) => setAgentId(event.target.value)}><option value="">All agents</option>{agents.map((agent) => <option value={agent.id} key={agent.id}>{agent.displayName}</option>)}</select></label><label><span>Compare with</span><select defaultValue="previous"><option value="previous">Previous month</option></select></label></section>;
+}
+
+function PaymentPerformance({ payments }: { payments: { totalInvoiced: number; totalConfirmed: number; pendingCount: number; pendingAmount?: number } | null }) {
+  const invoiced = payments?.totalInvoiced ?? 0;
+  const confirmed = payments?.totalConfirmed ?? 0;
+  const collectionRate = invoiced ? Math.round(confirmed / invoiced * 100) : 0;
+  return <section className="panel report-panel payment-performance"><PanelHeader title="Payment performance" subtitle="A single view of invoiced, collected, and outstanding cash." /><div className="payment-performance-total"><strong>{payments ? `₱${confirmed.toLocaleString()}` : "—"}</strong><span>Confirmed collections</span></div><div className="payment-performance-stats"><Info label="Invoiced" value={payments ? `₱${invoiced.toLocaleString()}` : "—"} /><Info label="Confirmed" value={payments ? `₱${confirmed.toLocaleString()}` : "—"} /><Info label="Pending" value={payments ? `₱${(payments.pendingAmount ?? 0).toLocaleString()}` : "—"} /></div><div className="collection-rate"><strong>Collection rate: {collectionRate}%</strong><span>{payments?.pendingCount ?? 0} payment(s) awaiting confirmation</span></div></section>;
 }
 
 function SettingsPage() {
@@ -7015,7 +8506,11 @@ function LeadForm({
         .then((items) =>
           setAgents(
             (items as typeof agents).filter(
-              (item) => item.role === "MarketingAgent" && item.isActive,
+              (item) =>
+                item.isActive &&
+                (session.user?.role === "MarketingAdmin"
+                  ? ["MarketingAgent", "MarketingAdmin"].includes(item.role)
+                  : item.role === "MarketingAgent"),
             ),
           ),
         )
@@ -7056,7 +8551,7 @@ function LeadForm({
                 "MarketingAdmin",
                 "GeneralManager",
               ]) && !form.assignedAgentId
-                ? "Assigned agent"
+                ? "Responsible owner"
                 : null,
             ]
               .filter(Boolean)
@@ -7098,13 +8593,10 @@ function LeadForm({
           onChange={(e) => setForm({ ...form, email: e.target.value })}
         />
       </label>
-      <label>
-        Source of income
-        <input
-          value={form.sourceOfIncome}
-          onChange={(e) => setForm({ ...form, sourceOfIncome: e.target.value })}
-        />
-      </label>
+      <SourceOfIncomeField
+        value={form.sourceOfIncome}
+        onChange={(sourceOfIncome) => setForm({ ...form, sourceOfIncome })}
+      />
       <label>
         Lead source
         <select
@@ -7134,7 +8626,7 @@ function LeadForm({
       {hasRole(session.user?.role, ["MarketingAdmin", "GeneralManager"]) && (
         <label>
           <span>
-            Assigned agent <span className="required-mark">*</span>
+            Responsible owner <span className="required-mark">*</span>
           </span>
           <select
             required
@@ -7147,15 +8639,16 @@ function LeadForm({
               attempted && !form.assignedAgentId ? "field-missing" : undefined
             }
           >
-            <option value="">Select agent</option>
+            <option value="">Select owner</option>
             {agents.map((agent) => (
               <option value={agent.id} key={agent.id}>
-                {agent.displayName}
+                {agent.displayName} — {roleLabel(agent.role as Role)}
+                {agent.id === session.user?.id ? " (You)" : ""}
               </option>
             ))}
           </select>
           {attempted && !form.assignedAgentId ? (
-            <small className="field-error">Choose the responsible agent.</small>
+            <small className="field-error">Choose the responsible owner.</small>
           ) : null}
         </label>
       )}
@@ -7773,7 +9266,47 @@ function documentTypeLabel(type: string) {
       PERSPECTIVE: "Perspective",
       SIGNED_CONTRACT: "Signed contract",
       PAYMENT_RECEIPT: "Payment receipt or bank confirmation",
+      DOH_FLOOR_PLAN: "DOH floor plan and device layout",
+      LEASE_AND_ADDRESS: "Lease contract and exact site address",
+      DTI_REGISTRATION: "DTI registration",
+      SITE_PHOTOS: "Site photos",
+      PERMITS: "Business permits",
+      BUSINESS_PLAN: "Franchisee business plan",
+      VALID_ID_TIN: "Valid ID and TIN",
+      FRANCHISE_AGREEMENT: "Signed franchise agreement",
+      TRAINING_APPLICATION: "Training application",
+      PHARMACY_PERMITS: "Pharmacy licenses and permits",
     }[type] ?? friendlyFieldLabel(type)
+  );
+}
+function statusLabel(status: string) {
+  const normalized = status.trim();
+  return (
+    {
+      NotConfigured: "Not configured",
+      NotGenerated: "Not generated",
+      NotStarted: "Not started",
+      UploadPending: "Upload in progress",
+      Uploaded: "Ready",
+      Archived: "Archived",
+      Pending: "Awaiting action",
+      Invoiced: "Invoice generated",
+      Submitted: "Awaiting Finance verification",
+      Confirmed: "Payment confirmed",
+      Draft: "Draft in progress",
+      InReview: "Under review",
+      RevisionRequested: "Changes requested",
+      Approved: "Approved for signing",
+      Signed: "Fully signed",
+      Created: "Signing link created",
+      Viewed: "Viewed by signer",
+      Completed: "Signed",
+      Expired: "Link expired",
+      Revoked: "Link revoked",
+      IN_PROGRESS: "In progress",
+      COMPLETED: "Completed",
+      Acknowledged: "Acknowledged",
+    }[normalized] ?? friendlyFieldLabel(normalized)
   );
 }
 

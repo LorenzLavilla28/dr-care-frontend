@@ -53,7 +53,9 @@ export interface Lead {
   productLine?: ProductLine;
   listPrice?: number;
   actualPrice?: number;
-  welcomeEmailReceived?: string;
+  welcomeEmailStatus?: string;
+  welcomeEmailQueuedAt?: string;
+  welcomeEmailSentAt?: string;
   goodTimeToDiscuss?: string;
   lastCallOutcome?: string;
   state: LeadState;
@@ -64,6 +66,41 @@ export interface Lead {
   version: number;
   locationAnalysisPending: boolean;
   downPaymentSubmittedForFinance?: boolean;
+}
+export type LocationAnalysisResponseCode =
+  | "YES_COMPLETELY"
+  | "YES_PARTIALLY"
+  | "NO"
+  | "DONT_KNOW";
+export interface LocationAnalysisAnswer {
+  questionCode: string;
+  response: LocationAnalysisResponseCode;
+  remark?: string | null;
+}
+export interface LocationAnalysisQuestion {
+  code: string;
+  group: string;
+  prompt: string;
+  hint?: string | null;
+}
+export interface LocationAnalysisResponse {
+  leadId: string;
+  candidateName: string;
+  preferredLocation: string;
+  leaseOwnershipStatus: string;
+  status: "Draft" | "Submitted" | "Approved" | "Returned" | string;
+  notes?: string | null;
+  reviewNotes?: string | null;
+  updatedAt: string;
+  answers: LocationAnalysisAnswer[];
+  questionCount: number;
+  answeredCount: number;
+  submittedAt?: string | null;
+  submittedByName?: string | null;
+  evaluatedAt?: string | null;
+  evaluatedByName?: string | null;
+  revisionReason?: string | null;
+  questions: LocationAnalysisQuestion[];
 }
 export interface Activity {
   id: string;
@@ -82,6 +119,20 @@ export interface Task {
   status: "Open" | "Completed" | "Cancelled";
   createdAt: string;
   dueAt?: string | null;
+}
+export interface CompletedWorkItem {
+  id: string;
+  leadId: string;
+  title: string;
+  detail: string;
+  kind: "Task" | "Workflow";
+  completedAt: string;
+}
+export interface PagedResponse<T> {
+  items: T[];
+  page: number;
+  pageSize: number;
+  total: number;
 }
 export interface DocumentItem {
   id: string;
@@ -105,6 +156,10 @@ export interface Contract {
   franchiseeSignedAt?: string;
   drCareSignerName?: string;
   drCareSignedAt?: string;
+  revisionReason?: string;
+  revisionRequestedAt?: string;
+  revisionRequestedBy?: string;
+  revisionRequestedByName?: string;
 }
 export interface SigningRequest {
   id: string;
@@ -116,6 +171,7 @@ export interface SigningRequest {
   status: string;
   expiresAt: string;
   signedAt?: string;
+  emailQueued: boolean;
   signingUrl?: string;
 }
 export interface QueueItem {
@@ -124,6 +180,48 @@ export interface QueueItem {
   state: LeadState;
   updatedAt: string;
   version: number;
+}
+export interface FinancePaymentItem {
+  paymentId: string;
+  leadId: string;
+  leadName: string;
+  location?: string;
+  leadState: LeadState;
+  ownerId: string;
+  ownerName: string;
+  invoiceNumber?: string;
+  amount: number;
+  currency: string;
+  status: "Awaiting" | "Confirmed" | string;
+  activityAt: string;
+  submittedAt?: string;
+  confirmedAt?: string;
+  submittedByName?: string;
+  confirmedByName?: string;
+  confirmationReference?: string;
+  hasPaymentEvidence: boolean;
+}
+export interface FinancePaymentEvent {
+  id: string;
+  type: string;
+  message: string;
+  createdAt: string;
+  actorName: string;
+}
+export interface FinancePaymentDetail {
+  payment: FinancePaymentItem;
+  events: FinancePaymentEvent[];
+  evidenceDocuments: DocumentItem[];
+}
+export interface FinanceWorkbenchResponse {
+  items: FinancePaymentItem[];
+  page: number;
+  pageSize: number;
+  total: number;
+  awaitingCount: number;
+  pendingAmount: number;
+  confirmedThisMonth: number;
+  exceptionCount: number;
 }
 export interface Notification {
   id: string;
@@ -330,19 +428,26 @@ export const api = {
       rawRequest<unknown>(`/api/v1/leads/${id}/qualification`, json(payload)),
     assign: (id: string, payload: unknown) =>
       rawRequest<Lead>(`/api/v1/leads/${id}/assign`, json(payload)),
-    activities: (id: string) =>
-      rawRequest<Activity[]>(`/api/v1/leads/${id}/activities`),
+    activities: (id: string, page = 1) =>
+      rawRequest<PagedResponse<Activity>>(
+        `/api/v1/leads/${id}/activities?page=${page}`,
+      ),
     addActivity: (id: string, payload: unknown) =>
       rawRequest<Activity>(`/api/v1/leads/${id}/activities`, json(payload)),
     location: (id: string) =>
-      rawRequest<unknown>(`/api/v1/leads/${id}/location-analysis`),
+      rawRequest<LocationAnalysisResponse>(`/api/v1/leads/${id}/location-analysis`),
     updateLocation: (id: string, payload: unknown) =>
-      rawRequest<unknown>(`/api/v1/leads/${id}/location-analysis`, {
+      rawRequest<LocationAnalysisResponse>(`/api/v1/leads/${id}/location-analysis`, {
         method: "PUT",
         body: JSON.stringify(payload),
       }),
+    submitLocation: (id: string, payload: unknown = {}) =>
+      rawRequest<LocationAnalysisResponse>(
+        `/api/v1/leads/${id}/location-analysis/submit`,
+        json(payload),
+      ),
     evaluateLocation: (id: string, payload: unknown) =>
-      rawRequest<unknown>(
+      rawRequest<{ leadId: string; decision: string; notes?: string; evaluatedAt: string; state: LeadState }>(
         `/api/v1/leads/${id}/location-analysis/evaluate`,
         json(payload),
       ),
@@ -454,10 +559,14 @@ export const api = {
       ),
     preLaunch: (id: string) =>
       rawRequest<unknown>(`/api/v1/leads/${id}/pre-launch`),
-    initializePreLaunch: (id: string, nurseOrDoctorAvailable = false) =>
+    initializePreLaunch: (
+      id: string,
+      nurseOrDoctorAvailable = false,
+      confirmSignedContractReview = false,
+    ) =>
       rawRequest<unknown>(
         `/api/v1/leads/${id}/pre-launch/initialize`,
-        json({ nurseOrDoctorAvailable }),
+        json({ nurseOrDoctorAvailable, confirmSignedContractReview }),
       ),
     updatePreLaunchItem: (id: string, itemId: string, payload: unknown) =>
       rawRequest<unknown>(
@@ -484,6 +593,10 @@ export const api = {
       rawRequest<Task[]>(
         `/api/v1/tasks${leadId ? `?leadId=${encodeURIComponent(leadId)}` : ""}`,
       ),
+    completed: (page = 1) =>
+      rawRequest<PagedResponse<CompletedWorkItem>>(
+        `/api/v1/tasks/completed?page=${page}`,
+      ),
     get: (id: string) => rawRequest<Task>(`/api/v1/tasks/${id}`),
     create: (payload: unknown) =>
       rawRequest<Task>("/api/v1/tasks", json(payload)),
@@ -505,6 +618,12 @@ export const api = {
     gm: () => rawRequest<QueueItem[]>("/api/v1/gm/contract-review-queue"),
     admin: () => rawRequest<QueueItem[]>("/api/v1/admin/endorsement-queue"),
   },
+  finance: {
+    workbench: (query = "") =>
+      rawRequest<FinanceWorkbenchResponse>(`/api/v1/finance/workbench${query}`),
+    payment: (id: string) =>
+      rawRequest<FinancePaymentDetail>(`/api/v1/finance/payments/${id}`),
+  },
   reports: {
     overview: (query = "") =>
       rawRequest<unknown>(`/api/v1/reports/overview${query}`),
@@ -523,7 +642,18 @@ export const api = {
     markRead: (id: string) =>
       rawRequest<Notification>(`/api/v1/notifications/${id}/read`, json({})),
   },
-  audit: { list: () => rawRequest<unknown[]>("/api/v1/audit-logs") },
+  audit: {
+    list: (leadId?: string, page = 1) =>
+      rawRequest<PagedResponse<{
+        id: string;
+        leadId?: string;
+        actorId?: string;
+        action: string;
+        createdAt: string;
+      }>>(
+        `/api/v1/audit-logs?page=${page}${leadId ? `&leadId=${encodeURIComponent(leadId)}` : ""}`,
+      ),
+  },
   settings: {
     pricing: () => rawRequest<unknown>("/api/v1/settings/pricing"),
     updatePricing: (payload: unknown) =>
