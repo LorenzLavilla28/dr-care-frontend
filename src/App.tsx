@@ -8719,6 +8719,23 @@ function LeadForm({
   const [agents, setAgents] = useState<
     { id: string; displayName: string; role: string; isActive: boolean }[]
   >([]);
+  const emailValue = form.email.trim();
+  const contactNumberValue = form.contactNumber.trim();
+  const invalidEmail =
+    emailValue.length > 0 &&
+    !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailValue);
+  const invalidContactNumber =
+    contactNumberValue.length > 0 &&
+    !/^[0-9+().\-\s]+$/.test(contactNumberValue);
+  const missingFields = [
+    !form.fullName.trim() ? "Full name" : null,
+    !form.address.trim() ? "Franchisee address" : null,
+    !form.preferredLocation.trim() ? "Proposed location" : null,
+    hasRole(session.user?.role, ["MarketingAdmin", "GeneralManager"]) &&
+    !form.assignedAgentId
+      ? "Responsible owner"
+      : null,
+  ].filter(Boolean) as string[];
   useEffect(() => {
     if (hasRole(session.user?.role, ["MarketingAdmin", "GeneralManager"]))
       api.users
@@ -8739,21 +8756,18 @@ function LeadForm({
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     setAttempted(true);
-    const assignmentRequired = hasRole(session.user?.role, [
-      "MarketingAdmin",
-      "GeneralManager",
-    ]);
     if (
-      !form.fullName.trim() ||
-      !form.address.trim() ||
-      !form.preferredLocation.trim() ||
-      (assignmentRequired && !form.assignedAgentId)
+      missingFields.length > 0 ||
+      invalidEmail ||
+      invalidContactNumber
     )
       return;
     setBusy(true);
     try {
       await onSubmit({
         ...form,
+        contactNumber: contactNumberValue || null,
+        email: emailValue || null,
         productLine: form.productLine || null,
         assignedAgentId: form.assignedAgentId || null,
       });
@@ -8764,27 +8778,14 @@ function LeadForm({
   return (
     <form className="form-grid" onSubmit={submit} noValidate>
       {attempted &&
-      (!form.fullName.trim() ||
-        !form.address.trim() ||
-        !form.preferredLocation.trim() ||
-        (hasRole(session.user?.role, ["MarketingAdmin", "GeneralManager"]) &&
-          !form.assignedAgentId)) ? (
+      (missingFields.length > 0 || invalidEmail || invalidContactNumber) ? (
         <div className="missing-fields-summary form-wide" role="alert">
           <strong>Please complete</strong>
           <span>
-            {[
-              !form.fullName.trim() ? "Full name" : null,
-              !form.address.trim() ? "Franchisee address" : null,
-              !form.preferredLocation.trim() ? "Proposed location" : null,
-              hasRole(session.user?.role, [
-                "MarketingAdmin",
-                "GeneralManager",
-              ]) && !form.assignedAgentId
-                ? "Responsible owner"
-                : null,
-            ]
-              .filter(Boolean)
-              .join(", ")}
+            {[...missingFields,
+              ...(invalidEmail ? ["Email format"] : []),
+              ...(invalidContactNumber ? ["Contact number format"] : []),
+            ].join(", ")}
           </span>
         </div>
       ) : null}
@@ -8808,19 +8809,44 @@ function LeadForm({
         ) : null}
       </label>
       <label>
-        Contact number
+        <span>
+          Contact number <span className="field-optional">(optional)</span>
+        </span>
         <input
+          type="tel"
+          autoComplete="tel"
+          placeholder="+63 917 123 4567"
           value={form.contactNumber}
           onChange={(e) => setForm({ ...form, contactNumber: e.target.value })}
+          aria-invalid={attempted && invalidContactNumber}
+          className={
+            attempted && invalidContactNumber ? "field-missing" : undefined
+          }
         />
+        {attempted && invalidContactNumber ? (
+          <small className="field-error">
+            Enter a valid phone number, or leave it blank.
+          </small>
+        ) : null}
       </label>
       <label>
-        Email
+        <span>
+          Email <span className="field-optional">(optional)</span>
+        </span>
         <input
           type="email"
+          autoComplete="email"
+          placeholder="name@example.com"
           value={form.email}
           onChange={(e) => setForm({ ...form, email: e.target.value })}
+          aria-invalid={attempted && invalidEmail}
+          className={attempted && invalidEmail ? "field-missing" : undefined}
         />
+        {attempted && invalidEmail ? (
+          <small className="field-error">
+            Enter a valid email address, or leave it blank.
+          </small>
+        ) : null}
       </label>
       <label>
         <span>
