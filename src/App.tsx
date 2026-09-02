@@ -64,9 +64,22 @@ import {
   type SigningRequest,
   type Task,
 } from "./api";
+import {
+  joinRealtimeLead,
+  leaveRealtimeLead,
+  startRealtime,
+  stopRealtime,
+  subscribeRealtime,
+} from "./realtime";
 
 type Icon = ComponentType<{ size?: number; strokeWidth?: number }>;
 type Notice = { message: string; tone?: "success" | "error" };
+
+function useRealtimeRefresh() {
+  const [revision, setRevision] = useState(0);
+  useEffect(() => subscribeRealtime(() => setRevision((value) => value + 1)), []);
+  return revision;
+}
 
 const states: { label: string; value: LeadState; tone: string }[] = [
   { label: "New", value: "New", tone: "slate" },
@@ -1371,6 +1384,12 @@ function Shell({
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   useEffect(() => {
+    void startRealtime().catch(() => undefined);
+    return () => {
+      void stopRealtime();
+    };
+  }, []);
+  useEffect(() => {
     if (!mobileOpen) return;
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key === "Escape") setMobileOpen(false);
@@ -1525,6 +1544,7 @@ function DashboardContent({
 }: {
   user: NonNullable<typeof session.user>;
 }) {
+  const realtimeRevision = useRealtimeRefresh();
   const [leads, setLeads] = useState<Lead[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1536,7 +1556,7 @@ function DashboardContent({
       })
       .catch(() => undefined)
       .finally(() => setLoading(false));
-  }, []);
+  }, [realtimeRevision]);
   const attention = leads
     .filter((lead) =>
       [
@@ -1685,6 +1705,7 @@ function PipelineContent({
 }: {
   user: NonNullable<typeof session.user>;
 }) {
+  const realtimeRevision = useRealtimeRefresh();
   const [leads, setLeads] = useState<Lead[]>([]);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
@@ -1709,7 +1730,7 @@ function PipelineContent({
         }),
       )
       .finally(() => setLoading(false));
-  }, []);
+  }, [realtimeRevision]);
   const filtered = leads.filter((lead) => {
     const matchesSearch =
       `${lead.fullName} ${lead.email} ${lead.preferredLocation ?? ""} ${lead.productLine ?? ""}`
@@ -1941,6 +1962,7 @@ function LeadDetail() {
 
 function LeadDetailContent() {
   const { leadId = "" } = useParams();
+  const realtimeRevision = useRealtimeRefresh();
   const [lead, setLead] = useState<Lead | null>(null);
   const [activities, setActivities] = useState<ActivityItem[]>([]);
   const [activityPage, setActivityPage] = useState(1);
@@ -2035,6 +2057,17 @@ function LeadDetailContent() {
   };
   useEffect(() => {
     void load();
+  }, [leadId, realtimeRevision]);
+  useEffect(() => {
+    if (!leadId) return;
+    let cancelled = false;
+    void startRealtime()
+      .then(() => (cancelled ? undefined : joinRealtimeLead(leadId)))
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+      void leaveRealtimeLead(leadId).catch(() => undefined);
+    };
   }, [leadId]);
   if (error)
     return (
@@ -7212,6 +7245,7 @@ function TasksContent({
 }: {
   user: NonNullable<typeof session.user>;
 }) {
+  const realtimeRevision = useRealtimeRefresh();
   const [tasks, setTasks] = useState<Task[]>([]);
   const [completedWork, setCompletedWork] = useState<CompletedWorkItem[]>([]);
   const [completedPage, setCompletedPage] = useState(1);
@@ -7246,7 +7280,7 @@ function TasksContent({
   };
   useEffect(() => {
     void load();
-  }, []);
+  }, [realtimeRevision]);
   const loadCompletedPage = async (page: number) => {
     if (completedPageBusy) return;
     setCompletedPageBusy(true);
@@ -7726,6 +7760,7 @@ function QueuePageContent({
   empty: string;
   workflowTab?: string;
 }) {
+  const realtimeRevision = useRealtimeRefresh();
   const [items, setItems] = useState<
     {
       leadId: string;
@@ -7741,7 +7776,7 @@ function QueuePageContent({
       .then((result) => setItems(result as typeof items))
       .catch(() => undefined)
       .finally(() => setLoading(false));
-  }, [load]);
+  }, [load, realtimeRevision]);
   return (
     <Page title={title} subtitle={subtitle}>
       <section className="panel queue-panel">
@@ -7788,6 +7823,7 @@ function QueuePageContent({
 function FinanceWorkbench() {
   const role = session.user?.role;
   if (!hasRole(role, ["Finance", "Leadership"])) return <Navigate to="/" replace />;
+  const realtimeRevision = useRealtimeRefresh();
   const [view, setView] = useState<"action" | "history">("action");
   const [status, setStatus] = useState("all");
   const [search, setSearch] = useState("");
@@ -7833,7 +7869,7 @@ function FinanceWorkbench() {
       if (!cancelled) setLoading(false);
     });
     return () => { cancelled = true; };
-  }, [view, status, search, dateRange, ownerId, page]);
+  }, [view, status, search, dateRange, ownerId, page, realtimeRevision]);
 
   const changeView = (next: "action" | "history") => {
     setView(next);
@@ -8123,6 +8159,7 @@ function PreLaunchQueue() {
   return <PreLaunchQueueContent />;
 }
 function PreLaunchQueueContent() {
+  const realtimeRevision = useRealtimeRefresh();
   const [items, setItems] = useState<Lead[]>([]);
   useEffect(() => {
     api.leads
@@ -8135,7 +8172,7 @@ function PreLaunchQueueContent() {
         ),
       )
       .catch(() => undefined);
-  }, []);
+  }, [realtimeRevision]);
   return (
     <Page
       title="Signed agreements & pre-launch"
@@ -8178,6 +8215,7 @@ function PreLaunchQueueContent() {
 }
 
 function EndorsementsQueue() {
+  const realtimeRevision = useRealtimeRefresh();
   const [items, setItems] = useState<
     {
       id: string;
@@ -8217,7 +8255,7 @@ function EndorsementsQueue() {
       .catch(() => undefined);
   useEffect(() => {
     void load();
-  }, []);
+  }, [realtimeRevision]);
   const acknowledge = async (id: string) => {
     setBusy(id);
     try {
@@ -8310,6 +8348,7 @@ function ReportsContent() {
   const [previousPayments, setPreviousPayments] = useState<Payment | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const realtimeRevision = useRealtimeRefresh();
 
   const getPeriod = (value: ReportingPeriod) => {
     const now = new Date();
@@ -8365,7 +8404,7 @@ function ReportsContent() {
       setPreviousConversion(previousConversionResult as Conversion);
       setPreviousPayments(previousPaymentResult as Payment);
     }).catch((e) => setError(errorMessage(e, "Unable to load reports."))).finally(() => setLoading(false));
-  }, [period, agentId]);
+  }, [period, agentId, realtimeRevision]);
 
   const money = (value?: number | null) => value == null ? "—" : `₱${value.toLocaleString("en-PH", { maximumFractionDigits: 0 })}`;
   const delta = (current?: number, previous?: number) => {
