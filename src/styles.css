@@ -5046,13 +5046,23 @@ a {
   display: flex;
   align-items: stretch;
   gap: 12px;
+  /* Keep the horizontal scrollbar tied to the board viewport. Individual
+     columns own their vertical overflow so a long pipeline never pushes the
+     horizontal scrollbar below the last card. */
+  height: clamp(420px, calc(100vh - 300px), 620px);
+  min-height: 420px;
+  min-width: 0;
   overflow-x: auto;
+  overflow-y: hidden;
   padding: 1px 2px 12px;
   scroll-snap-type: x proximity;
 }
 .kanban-column {
   flex: 0 0 clamp(218px, 16vw, 258px);
-  min-height: 448px;
+  min-height: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
   box-sizing: border-box;
   border: 1px solid #eef1f3;
   border-radius: 12px;
@@ -5100,7 +5110,12 @@ a {
   color: #c0c6cb;
 }
 .column-cards {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   margin-top: 13px;
+  padding-right: 3px;
 }
 .lead-card {
   overflow: hidden;
@@ -5257,6 +5272,9 @@ a {
   }
   .kanban-column {
     flex-basis: 235px;
+  }
+  .kanban-board {
+    height: 500px;
     min-height: 390px;
   }
 }
