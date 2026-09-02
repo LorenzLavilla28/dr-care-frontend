@@ -250,6 +250,145 @@ const industryOptions = [
   "Others",
 ] as const;
 
+let googleMapsPromise: Promise<any> | null = null;
+
+function loadGoogleMaps(apiKey: string) {
+  if (googleMapsPromise) return googleMapsPromise;
+  googleMapsPromise = new Promise((resolve, reject) => {
+    const existing = document.querySelector<HTMLScriptElement>(
+      'script[data-dr-care-google-maps="true"]',
+    );
+    if (existing) {
+      if ((window as any).google?.maps) {
+        resolve((window as any).google.maps);
+        return;
+      }
+      existing.addEventListener("load", () => resolve((window as any).google.maps), { once: true });
+      existing.addEventListener("error", () => reject(new Error("Google Maps could not be loaded.")), { once: true });
+      return;
+    }
+    const script = document.createElement("script");
+    script.dataset.drCareGoogleMaps = "true";
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(apiKey)}&v=weekly&loading=async`;
+    script.async = true;
+    script.defer = true;
+    script.onload = () => resolve((window as any).google?.maps);
+    script.onerror = () => reject(new Error("Google Maps could not be loaded."));
+    document.head.appendChild(script);
+  });
+  return googleMapsPromise;
+}
+
+function LocationPicker({
+  value,
+  onChange,
+  label,
+  required = false,
+  invalid = false,
+  disabled = false,
+  help,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  label: string;
+  required?: boolean;
+  invalid?: boolean;
+  disabled?: boolean;
+  help?: string;
+}) {
+  const apiKey = (import.meta.env.VITE_GOOGLE_MAPS_API_KEY as string | undefined)?.trim();
+  const mapId = (import.meta.env.VITE_GOOGLE_MAPS_MAP_ID as string | undefined)?.trim() || "DEMO_MAP_ID";
+  const hostRef = useRef<HTMLDivElement>(null);
+  const mapRef = useRef<HTMLDivElement>(null);
+  const onChangeRef = useRef(onChange);
+  const [mapStatus, setMapStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
+  useEffect(() => { onChangeRef.current = onChange; }, [onChange]);
+
+  useEffect(() => {
+    if (!apiKey || disabled || !hostRef.current || !mapRef.current) return;
+    let disposed = false;
+    setMapStatus("loading");
+    void loadGoogleMaps(apiKey)
+      .then(async (maps: any) => {
+        if (disposed || !maps) return;
+        const [{ Map }, { AdvancedMarkerElement }, { PlaceAutocompleteElement }] = await Promise.all([
+          maps.importLibrary("maps"),
+          maps.importLibrary("marker"),
+          maps.importLibrary("places"),
+        ]);
+        if (disposed || !hostRef.current || !mapRef.current) return;
+        const map = new Map(mapRef.current, {
+          center: { lat: 14.5995, lng: 120.9842 },
+          zoom: 5,
+          mapId,
+          disableDefaultUI: true,
+          zoomControl: true,
+        });
+        const autocomplete = new PlaceAutocompleteElement();
+        autocomplete.setAttribute("placeholder", "Search an address or place");
+        autocomplete.disabled = disabled;
+        hostRef.current.replaceChildren(autocomplete);
+        const selectHandler = async (event: Event) => {
+          const prediction = (event as any).placePrediction;
+          if (!prediction) return;
+          const place = prediction.toPlace();
+          await place.fetchFields({ fields: ["displayName", "formattedAddress", "location"] });
+          const address = place.formattedAddress || place.displayName;
+          if (address) onChangeRef.current(address);
+          if (place.location) {
+            map.setCenter(place.location);
+            map.setZoom(16);
+            new AdvancedMarkerElement({ map, position: place.location, title: address });
+          }
+        };
+        autocomplete.addEventListener("gmp-select", selectHandler);
+        setMapStatus("ready");
+      })
+      .catch(() => { if (!disposed) setMapStatus("error"); });
+    return () => {
+      disposed = true;
+      if (hostRef.current) hostRef.current.replaceChildren();
+    };
+  }, [apiKey, disabled]);
+
+  return (
+    <div className="location-picker">
+      <label>
+        <span>{label}{required ? <span className="required-mark"> *</span> : null}</span>
+        {apiKey && !disabled ? <div ref={hostRef} className="location-picker-autocomplete" /> : (
+          <input
+            value={value}
+            onChange={(event) => onChange(event.target.value)}
+            required={required}
+            maxLength={240}
+            disabled={disabled}
+            placeholder="Street, barangay, city, province"
+            aria-invalid={invalid}
+            className={invalid ? "field-missing" : undefined}
+          />
+        )}
+      </label>
+      {apiKey && !disabled ? <div ref={mapRef} className="location-picker-map" aria-label="Map preview" /> : null}
+      {help ? <small className="location-picker-help">{help}</small> : null}
+      {!apiKey && !disabled ? <small className="location-picker-help">Google Maps is not configured, so you can enter the complete location manually.</small> : null}
+      {mapStatus === "loading" ? <small className="location-picker-help">Loading Google Maps…</small> : null}
+      {mapStatus === "error" ? <small className="field-error">Google Maps could not load. Enter the complete location manually.</small> : null}
+      {apiKey && !disabled ? (
+        <input
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          required={required}
+          maxLength={240}
+          placeholder="Selected location"
+          aria-label={`${label} selected value`}
+          aria-invalid={invalid}
+          className={invalid ? "field-missing" : undefined}
+        />
+      ) : null}
+    </div>
+  );
+}
+
 const discussionTimeOptions = [
   "Morning (8 AM–12 PM)",
   "Afternoon (12 PM–5 PM)",
@@ -4365,6 +4504,8 @@ function InquiryPanel({
     form.contactNumber.trim() ? null : "Contact number",
     form.email.trim() ? null : "Email",
     form.sourceOfIncome.trim() ? null : "Source of income",
+    form.address.trim() ? null : "Franchisee address",
+    form.preferredLocation.trim() ? null : "Proposed location",
   ].filter((item): item is string => Boolean(item));
 
   if (!["New", "Inquiry", "InquiryIncomplete"].includes(lead.state))
@@ -4420,8 +4561,6 @@ function InquiryPanel({
             ["age", "Age", true],
             ["contactNumber", "Contact number", true],
             ["email", "Email", true],
-            ["preferredLocation", "Preferred location", false],
-            ["address", "Address", false],
             ["meetingDateTime", "Meeting date and time", false],
             ["questionsConcerns", "Questions or concerns", false],
           ] as [keyof typeof form, string, boolean][]
@@ -4453,7 +4592,39 @@ function InquiryPanel({
               <small className="field-error">{label} is required.</small>
             ) : null}
           </label>
-        ))}
+          ))}
+        <div className="form-wide">
+          <LocationPicker
+            label="Proposed franchise location"
+            value={form.preferredLocation}
+            onChange={(preferredLocation) =>
+              setForm((current) => ({ ...current, preferredLocation }))
+            }
+            required
+            invalid={!form.preferredLocation.trim()}
+            help="This location is used for the location assessment and agreement."
+          />
+        </div>
+        <label>
+          <span>
+            Franchisee address <span className="required-mark"> *</span>
+          </span>
+          <input
+            value={form.address}
+            onChange={(e) =>
+              setForm((current) => ({ ...current, address: e.target.value }))
+            }
+            required
+            minLength={5}
+            maxLength={500}
+            aria-invalid={!form.address.trim()}
+            className={!form.address.trim() ? "field-missing" : undefined}
+            placeholder="Home or registered business address"
+          />
+          {!form.address.trim() ? (
+            <small className="field-error">Franchisee address is required.</small>
+          ) : null}
+        </label>
         <IndustryField
           value={form.industry}
           onChange={(industry) =>
@@ -5042,7 +5213,15 @@ function LocationAnalysisPanel({
         {!lead.preferredLocation && !analysis && <div className="location-analysis-callout"><AlertTriangle size={17} /> Add the proposed location in the Inquiry tab first, then return here to complete this assessment.</div>}
         <form onSubmit={saveAssessment}>
           <div className="location-analysis-meta">
-            <label>Exact address / proposed location<input value={preferredLocation} onChange={(e) => setPreferredLocation(e.target.value)} maxLength={240} disabled={isReadOnly} placeholder="Street, barangay, city, province" /></label>
+            <LocationPicker
+              label="Proposed franchise location"
+              value={preferredLocation}
+              onChange={setPreferredLocation}
+              required
+              invalid={!preferredLocation.trim()}
+              disabled={isReadOnly}
+              help="Use the map search to confirm the site, or enter it manually."
+            />
             <label>Candidate<input value={analysis?.candidateName ?? lead.fullName} readOnly /></label>
             <label>Lease / ownership<select value={leaseOwnershipStatus} onChange={(e) => setLeaseOwnershipStatus(e.target.value)} disabled={isReadOnly}><option value="">Select status</option>{leaseOwnershipOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
           </div>
@@ -8490,6 +8669,8 @@ function LeadForm({
     contactNumber: "",
     email: "",
     sourceOfIncome: "",
+    address: "",
+    preferredLocation: "",
     leadSource: "Manual",
     productLine: "",
     assignedAgentId: "",
@@ -8523,7 +8704,12 @@ function LeadForm({
       "MarketingAdmin",
       "GeneralManager",
     ]);
-    if (!form.fullName.trim() || (assignmentRequired && !form.assignedAgentId))
+    if (
+      !form.fullName.trim() ||
+      !form.address.trim() ||
+      !form.preferredLocation.trim() ||
+      (assignmentRequired && !form.assignedAgentId)
+    )
       return;
     setBusy(true);
     try {
@@ -8540,6 +8726,8 @@ function LeadForm({
     <form className="form-grid" onSubmit={submit} noValidate>
       {attempted &&
       (!form.fullName.trim() ||
+        !form.address.trim() ||
+        !form.preferredLocation.trim() ||
         (hasRole(session.user?.role, ["MarketingAdmin", "GeneralManager"]) &&
           !form.assignedAgentId)) ? (
         <div className="missing-fields-summary form-wide" role="alert">
@@ -8547,6 +8735,8 @@ function LeadForm({
           <span>
             {[
               !form.fullName.trim() ? "Full name" : null,
+              !form.address.trim() ? "Franchisee address" : null,
+              !form.preferredLocation.trim() ? "Proposed location" : null,
               hasRole(session.user?.role, [
                 "MarketingAdmin",
                 "GeneralManager",
@@ -8593,6 +8783,37 @@ function LeadForm({
           onChange={(e) => setForm({ ...form, email: e.target.value })}
         />
       </label>
+      <label>
+        <span>
+          Franchisee address <span className="required-mark">*</span>
+        </span>
+        <input
+          required
+          minLength={5}
+          maxLength={500}
+          value={form.address}
+          onChange={(e) => setForm({ ...form, address: e.target.value })}
+          placeholder="Home or registered business address"
+          aria-invalid={attempted && !form.address.trim()}
+          className={attempted && !form.address.trim() ? "field-missing" : undefined}
+        />
+        {attempted && !form.address.trim() ? (
+          <small className="field-error">Franchisee address is required.</small>
+        ) : null}
+      </label>
+      <div className="form-wide">
+        <LocationPicker
+          label="Proposed franchise location"
+          value={form.preferredLocation}
+          onChange={(preferredLocation) => setForm({ ...form, preferredLocation })}
+          required
+          invalid={attempted && !form.preferredLocation.trim()}
+          help="Search for the site in Google Maps, or enter the full address if Maps is not configured."
+        />
+        {attempted && !form.preferredLocation.trim() ? (
+          <small className="field-error">Proposed franchise location is required.</small>
+        ) : null}
+      </div>
       <SourceOfIncomeField
         value={form.sourceOfIncome}
         onChange={(sourceOfIncome) => setForm({ ...form, sourceOfIncome })}
