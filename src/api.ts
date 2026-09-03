@@ -93,6 +93,12 @@ export interface PublicEventLanding {
   startsAt: string;
   endsAt: string;
   isOpen: boolean;
+  /** Active Sales Agents who can be selected by a prospect. */
+  staffOptions?: PublicEventStaffOption[];
+}
+export interface PublicEventStaffOption {
+  id: string;
+  name: string;
 }
 export interface LeadCaptureEventRecord {
   id: string;
