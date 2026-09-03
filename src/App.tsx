@@ -3,23 +3,29 @@ import {
   useRef,
   useState,
   type ComponentType,
+  type ChangeEvent,
   type FormEvent,
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from "react";
-import { NavLink, Navigate, Route, Routes, useParams } from "react-router-dom";
+import { NavLink, Navigate, Route, Routes, useNavigate, useParams } from "react-router-dom";
 import {
   Activity,
   AlertTriangle,
   Archive,
   ArrowUpRight,
+  BarChart3,
+  Bell,
   BriefcaseBusiness,
+  CalendarDays,
   CheckCircle2,
   ChevronDown,
+  ChevronLeft,
   ChevronRight,
   CircleHelp,
   ClipboardCheck,
   Copy,
+  Crown,
   Clock3,
   Eraser,
   FileText,
@@ -30,7 +36,9 @@ import {
   LogOut,
   Menu,
   PanelLeftClose,
+  Pencil,
   Plus,
+  QrCode,
   RefreshCw,
   Search,
   Send,
@@ -39,9 +47,12 @@ import {
   Sparkles,
   Upload,
   UsersRound,
+  UserRound,
   WalletCards,
   X,
 } from "lucide-react";
+import QRCode from "qrcode";
+import headerLogo from "../assets/header-logo-CAyF_Iur.png";
 import {
   api,
   ApiError,
@@ -60,9 +71,12 @@ import {
   type LocationAnalysisQuestion,
   type LocationAnalysisResponse,
   type ProductLine,
+  type LeadCaptureEventRecord,
+  type PublicEventLanding,
   type Role,
   type SigningRequest,
   type Task,
+  type UserRecord,
 } from "./api";
 import {
   joinRealtimeLead,
@@ -95,6 +109,7 @@ const states: { label: string; value: LeadState; tone: string }[] = [
   { label: "Contract signed", value: "ContractSigned", tone: "green" },
   { label: "Pre-launch", value: "PreLaunch", tone: "teal" },
   { label: "Endorsed", value: "EndorsedToAdmin", tone: "red" },
+  { label: "Acknowledged", value: "Acknowledged", tone: "green" },
 ];
 
 const pipelineStages: {
@@ -165,6 +180,13 @@ const pipelineStages: {
     tone: "red",
     values: ["EndorsedToAdmin"],
   },
+  {
+    key: "acknowledged",
+    label: "Acknowledged",
+    description: "Admin Team received the handoff",
+    tone: "green",
+    values: ["Acknowledged"],
+  },
 ];
 
 type PipelineFilter = "all" | "mine" | "attention" | "overdue";
@@ -199,6 +221,7 @@ function formatDateTime(value: string) {
   return new Intl.DateTimeFormat("en-PH", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" }).format(new Date(value));
 }
 function isOverdueLead(lead: Lead) {
+  if (lead.state === "Acknowledged") return false;
   return lead.state === "FollowUp" || ageInDays(lead.updatedAt) >= 7;
 }
 function isAttentionLead(lead: Lead) {
@@ -263,145 +286,6 @@ const industryOptions = [
   "Others",
 ] as const;
 
-let googleMapsPromise: Promise<any> | null = null;
-
-function loadGoogleMaps(apiKey: string) {
-  if (googleMapsPromise) return googleMapsPromise;
-  googleMapsPromise = new Promise((resolve, reject) => {
-    const existing = document.querySelector<HTMLScriptElement>(
-      'script[data-dr-care-google-maps="true"]',
-    );
-    if (existing) {
-      if ((window as any).google?.maps) {
-        resolve((window as any).google.maps);
-        return;
-      }
-      existing.addEventListener("load", () => resolve((window as any).google.maps), { once: true });
-      existing.addEventListener("error", () => reject(new Error("Google Maps could not be loaded.")), { once: true });
-      return;
-    }
-    const script = document.createElement("script");
-    script.dataset.drCareGoogleMaps = "true";
-    script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(apiKey)}&v=weekly&loading=async`;
-    script.async = true;
-    script.defer = true;
-    script.onload = () => resolve((window as any).google?.maps);
-    script.onerror = () => reject(new Error("Google Maps could not be loaded."));
-    document.head.appendChild(script);
-  });
-  return googleMapsPromise;
-}
-
-function LocationPicker({
-  value,
-  onChange,
-  label,
-  required = false,
-  invalid = false,
-  disabled = false,
-  help,
-}: {
-  value: string;
-  onChange: (value: string) => void;
-  label: string;
-  required?: boolean;
-  invalid?: boolean;
-  disabled?: boolean;
-  help?: string;
-}) {
-  const apiKey = (import.meta.env.VITE_GOOGLE_MAPS_API_KEY as string | undefined)?.trim();
-  const mapId = (import.meta.env.VITE_GOOGLE_MAPS_MAP_ID as string | undefined)?.trim() || "DEMO_MAP_ID";
-  const hostRef = useRef<HTMLDivElement>(null);
-  const mapRef = useRef<HTMLDivElement>(null);
-  const onChangeRef = useRef(onChange);
-  const [mapStatus, setMapStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
-  useEffect(() => { onChangeRef.current = onChange; }, [onChange]);
-
-  useEffect(() => {
-    if (!apiKey || disabled || !hostRef.current || !mapRef.current) return;
-    let disposed = false;
-    setMapStatus("loading");
-    void loadGoogleMaps(apiKey)
-      .then(async (maps: any) => {
-        if (disposed || !maps) return;
-        const [{ Map }, { AdvancedMarkerElement }, { PlaceAutocompleteElement }] = await Promise.all([
-          maps.importLibrary("maps"),
-          maps.importLibrary("marker"),
-          maps.importLibrary("places"),
-        ]);
-        if (disposed || !hostRef.current || !mapRef.current) return;
-        const map = new Map(mapRef.current, {
-          center: { lat: 14.5995, lng: 120.9842 },
-          zoom: 5,
-          mapId,
-          disableDefaultUI: true,
-          zoomControl: true,
-        });
-        const autocomplete = new PlaceAutocompleteElement();
-        autocomplete.setAttribute("placeholder", "Search an address or place");
-        autocomplete.disabled = disabled;
-        hostRef.current.replaceChildren(autocomplete);
-        const selectHandler = async (event: Event) => {
-          const prediction = (event as any).placePrediction;
-          if (!prediction) return;
-          const place = prediction.toPlace();
-          await place.fetchFields({ fields: ["displayName", "formattedAddress", "location"] });
-          const address = place.formattedAddress || place.displayName;
-          if (address) onChangeRef.current(address);
-          if (place.location) {
-            map.setCenter(place.location);
-            map.setZoom(16);
-            new AdvancedMarkerElement({ map, position: place.location, title: address });
-          }
-        };
-        autocomplete.addEventListener("gmp-select", selectHandler);
-        setMapStatus("ready");
-      })
-      .catch(() => { if (!disposed) setMapStatus("error"); });
-    return () => {
-      disposed = true;
-      if (hostRef.current) hostRef.current.replaceChildren();
-    };
-  }, [apiKey, disabled]);
-
-  return (
-    <div className="location-picker">
-      <label>
-        <span>{label}{required ? <span className="required-mark"> *</span> : null}</span>
-        {apiKey && !disabled ? <div ref={hostRef} className="location-picker-autocomplete" /> : (
-          <input
-            value={value}
-            onChange={(event) => onChange(event.target.value)}
-            required={required}
-            maxLength={240}
-            disabled={disabled}
-            placeholder="Street, barangay, city, province"
-            aria-invalid={invalid}
-            className={invalid ? "field-missing" : undefined}
-          />
-        )}
-      </label>
-      {apiKey && !disabled ? <div ref={mapRef} className="location-picker-map" aria-label="Map preview" /> : null}
-      {help ? <small className="location-picker-help">{help}</small> : null}
-      {!apiKey && !disabled ? <small className="location-picker-help">Google Maps is not configured, so you can enter the complete location manually.</small> : null}
-      {mapStatus === "loading" ? <small className="location-picker-help">Loading Google Maps…</small> : null}
-      {mapStatus === "error" ? <small className="field-error">Google Maps could not load. Enter the complete location manually.</small> : null}
-      {apiKey && !disabled ? (
-        <input
-          value={value}
-          onChange={(event) => onChange(event.target.value)}
-          required={required}
-          maxLength={240}
-          placeholder="Selected location"
-          aria-label={`${label} selected value`}
-          aria-invalid={invalid}
-          className={invalid ? "field-missing" : undefined}
-        />
-      ) : null}
-    </div>
-  );
-}
-
 const discussionTimeOptions = [
   "Morning (8 AM–12 PM)",
   "Afternoon (12 PM–5 PM)",
@@ -447,7 +331,7 @@ function SourceOfIncomeField({
   return (
     <label>
       <span>
-        Source of income{required ? <span className="required-mark"> *</span> : null}
+        Source of income{required ? <span className="required-mark"> *</span> : <span className="field-optional"> (optional)</span>}
       </span>
       <select
         value={choice}
@@ -769,6 +653,13 @@ function nextStepForLead(lead: Lead, submittedForFinance = false): NextStep {
           "The Admin Team must acknowledge the completed franchise handoff.",
         tab: "Workflow",
       };
+    case "Acknowledged":
+      return {
+        label: "Handoff acknowledged",
+        detail:
+          "The Admin Team has acknowledged ownership. Downstream onboarding can continue.",
+        tab: "Workflow",
+      };
   }
 }
 
@@ -784,11 +675,13 @@ function nextActionOwnerForLead(
       return submittedForFinance ? "Finance team" : assignedAgent;
     case "DownPaymentConfirmed":
     case "ContractDrafting":
-      return "Marketing admin";
+      return assignedAgent;
     case "ContractReview":
       return "General manager";
     case "EndorsedToAdmin":
       return "Admin team";
+    case "Acknowledged":
+      return "No further action";
     default:
       return assignedAgent;
   }
@@ -798,18 +691,21 @@ function isMyCurrentAction(
   lead: Lead,
   user: NonNullable<typeof session.user>,
 ) {
+  const activeRole = canonicalRole(user.role);
   const owner = nextActionOwnerForLead(
     lead,
     Boolean(lead.downPaymentSubmittedForFinance),
   );
-  if (lead.assignedAgentId === user.id && owner === (lead.assignedAgentName ?? "Assigned agent")) return true;
+  // Work queues follow the role currently being acted as. A user may have
+  // several roles, but an admin-only action must not appear while they are
+  // working as a Sales Agent (and vice versa).
+  if (activeRole === "SalesAgent" && lead.assignedAgentId === user.id && owner === (lead.assignedAgentName ?? "Assigned agent")) return true;
   const roleOwner: Partial<Record<Role, string>> = {
-    MarketingAdmin: "Marketing admin",
     GeneralManager: "General manager",
     Finance: "Finance team",
     AdminTeam: "Admin team",
   };
-  return roleOwner[user.role] === owner;
+  return activeRole ? roleOwner[activeRole] === owner : false;
 }
 
 function isMyOpportunity(lead: Lead, user: NonNullable<typeof session.user>) {
@@ -821,19 +717,19 @@ const nav: { label: string; to: string; icon: Icon; roles?: Role[] }[] = [
     label: "Command center",
     to: "/",
     icon: LayoutDashboard,
-    roles: ["MarketingAgent", "MarketingAdmin", "GeneralManager", "Leadership"],
+    roles: ["SalesAgent", "GeneralManager", "Leadership"],
   },
   {
     label: "Franchise pipeline",
     to: "/pipeline",
     icon: BriefcaseBusiness,
-    roles: ["MarketingAgent", "MarketingAdmin", "GeneralManager", "Leadership"],
+    roles: ["SalesAgent", "GeneralManager", "Leadership"],
   },
   {
     label: "My work queue",
     to: "/tasks",
     icon: ListChecks,
-    roles: ["MarketingAgent", "MarketingAdmin", "GeneralManager", "Leadership"],
+    roles: ["SalesAgent", "GeneralManager", "Leadership"],
   },
   {
     label: "Finance",
@@ -845,13 +741,13 @@ const nav: { label: string; to: string; icon: Icon; roles?: Role[] }[] = [
     label: "Documents & contracts",
     to: "/contracts",
     icon: FileText,
-    roles: ["MarketingAgent", "MarketingAdmin", "GeneralManager", "Leadership"],
+    roles: ["SalesAgent", "GeneralManager", "Leadership"],
   },
   {
     label: "Pre-launch",
     to: "/pre-launch",
     icon: ClipboardCheck,
-    roles: ["MarketingAgent", "MarketingAdmin", "Leadership"],
+    roles: ["SalesAgent", "GeneralManager", "Leadership"],
   },
   {
     label: "Handoff queue",
@@ -863,52 +759,63 @@ const nav: { label: string; to: string; icon: Icon; roles?: Role[] }[] = [
     label: "Reports",
     to: "/reports",
     icon: Activity,
-    roles: ["MarketingAdmin", "GeneralManager", "Finance", "Leadership"],
+    roles: ["GeneralManager", "Finance", "Leadership"],
+  },
+  {
+    label: "Events",
+    to: "/events",
+    icon: CalendarDays,
+    roles: ["GeneralManager"],
   },
   {
     label: "Administration",
     to: "/settings",
     icon: Settings,
-    roles: ["MarketingAdmin", "Leadership"],
+    roles: ["GeneralManager", "Leadership"],
+  },
+  {
+    label: "User management",
+    to: "/users",
+    icon: UsersRound,
+    roles: ["GeneralManager", "Leadership"],
   },
 ];
 
 const leadReadRoles: Role[] = [
-  "MarketingAgent",
-  "MarketingAdmin",
+  "SalesAgent",
   "GeneralManager",
-  "Finance",
-  "AdminTeam",
   "Leadership",
 ];
 const pipelineReadRoles: Role[] = [
-  "MarketingAgent",
-  "MarketingAdmin",
+  "SalesAgent",
   "GeneralManager",
   "Leadership",
 ];
 const taskReadRoles: Role[] = [
-  "MarketingAgent",
-  "MarketingAdmin",
+  "SalesAgent",
   "GeneralManager",
   "Leadership",
 ];
 const leadWriteRoles: Role[] = [
-  "MarketingAgent",
-  "MarketingAdmin",
+  "SalesAgent",
   "GeneralManager",
 ];
-const marketingWriteRoles: Role[] = ["MarketingAgent", "MarketingAdmin"];
+const marketingWriteRoles: Role[] = ["SalesAgent", "GeneralManager"];
 
+function canonicalRole(role: Role | undefined): Role | undefined {
+  return role === "MarketingAgent" ? "SalesAgent" : role === "MarketingAdmin" ? "GeneralManager" : role;
+}
 function hasRole(role: Role | undefined, roles: Role[]) {
-  return !!role && roles.includes(role);
+  if (!role) return false;
+  const allowed = new Set(roles.map(canonicalRole));
+  return allowed.has(canonicalRole(role));
 }
 function canOpenPath(role: Role, path: string) {
   if (path.startsWith("/leads/")) return hasRole(role, leadReadRoles);
   if (path === "/pipeline") return hasRole(role, pipelineReadRoles);
   if (path === "/tasks") return hasRole(role, taskReadRoles);
   const item = nav.find((entry) => entry.to === path);
-  return !item?.roles || item.roles.includes(role);
+  return !item?.roles || hasRole(role, item.roles);
 }
 
 function ProtectedPage({
@@ -933,6 +840,9 @@ function App() {
   )?.[1];
   if (publicSigningToken)
     return <ContractSignPage token={decodeURIComponent(publicSigningToken)} />;
+  const publicEventToken = window.location.pathname.match(/^\/event\/([^/]+)$/)?.[1];
+  if (publicEventToken)
+    return <PublicEventPage token={decodeURIComponent(publicEventToken)} />;
   if (window.location.pathname === "/forgot-password") return <ForgotPasswordPage />;
   if (window.location.pathname === "/reset-password") return <ResetPasswordPage />;
   const [user, setUser] = useState(session.user);
@@ -959,7 +869,9 @@ function App() {
   };
   if (restoring) return <Loading />;
   if (!user) return <LoginPage onLogin={(next) => setUser(next)} />;
-  return <Shell user={user} onLogout={onLogout} />;
+  if (user.mustChangePassword)
+    return <ChangePasswordPage onComplete={(next) => setUser(next)} onLogout={onLogout} />;
+  return <Shell user={user} onLogout={onLogout} onUserChanged={setUser} />;
 }
 
 function LoginPage({
@@ -990,7 +902,7 @@ function LoginPage({
       <section className="login-brand">
         <div className="brand-lockup">
           <img
-            src="/assets/header-logo-CAyF_Iur.png"
+            src={headerLogo}
             alt="Dr. Care Medical Group"
           />
         </div>
@@ -1060,8 +972,60 @@ function LoginPage({
   );
 }
 
+function ChangePasswordPage({
+  onComplete,
+  onLogout,
+}: {
+  onComplete: (user: NonNullable<typeof session.user>) => void;
+  onLogout: () => void;
+}) {
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmation, setConfirmation] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    setError("");
+    if (newPassword.length < 12) {
+      setError("Use at least 12 characters for your new password.");
+      return;
+    }
+    if (newPassword !== confirmation) {
+      setError("The new passwords do not match.");
+      return;
+    }
+    setLoading(true);
+    try {
+      const response = await api.auth.changePassword({ currentPassword, newPassword });
+      session.set(response);
+      onComplete(response.user);
+    } catch (e) {
+      setError(errorMessage(e, "Unable to change your password."));
+    } finally {
+      setLoading(false);
+    }
+  };
+  return (
+    <PublicAccountPage>
+      <span className="eyebrow">SECURE ACCOUNT SETUP</span>
+      <h2>Choose your new password</h2>
+      <p className="muted">Your administrator created this account with a temporary password. Change it now to continue to the Dr. Care workspace.</p>
+      <form className="stack-form" onSubmit={submit}>
+        <label>Temporary password<input type="password" required autoComplete="current-password" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} /></label>
+        <label>New password<input type="password" required minLength={12} autoComplete="new-password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} /></label>
+        <label>Confirm new password<input type="password" required minLength={12} autoComplete="new-password" value={confirmation} onChange={(e) => setConfirmation(e.target.value)} /></label>
+        {error && <div className="form-error" role="alert">{error}</div>}
+        <button className="button button-primary button-wide" disabled={loading}>{loading ? "Updating password…" : "Save new password"}<ArrowUpRight size={17} /></button>
+        <a className="auth-link" href="/forgot-password">Forgot your temporary password?</a>
+        <button type="button" className="auth-link auth-link-button" onClick={() => void onLogout()}>Sign out</button>
+      </form>
+    </PublicAccountPage>
+  );
+}
+
 function PublicAccountPage({ children }: { children: ReactNode }) {
-  return <main className="login-page"><section className="login-brand"><div className="brand-lockup"><img src="/assets/header-logo-CAyF_Iur.png" alt="Dr. Care Medical Group" /></div><div className="brand-message"><span className="eyebrow">SECURE ACCOUNT ACCESS</span><h1>Always here for the work behind the care.</h1><p>Recover access to your Dr. Care workspace securely.</p></div></section><section className="login-panel"><div className="login-card">{children}</div></section></main>;
+  return <main className="login-page"><section className="login-brand"><div className="brand-lockup"><img src={headerLogo} alt="Dr. Care Medical Group" /></div><div className="brand-message"><span className="eyebrow">SECURE ACCOUNT ACCESS</span><h1>Always here for the work behind the care.</h1><p>Recover access to your Dr. Care workspace securely.</p></div></section><section className="login-panel"><div className="login-card">{children}</div></section></main>;
 }
 
 function ForgotPasswordPage() {
@@ -1076,6 +1040,64 @@ function ResetPasswordPage() {
   const submit = async (event: FormEvent) => { event.preventDefault(); setError(""); if (password.length < 12) { setError("Use at least 12 characters."); return; } if (password !== confirm) { setError("The passwords do not match."); return; } setBusy(true); try { await api.auth.resetPassword({ token, email, newPassword: password }); setDone(true); } catch (e) { setError(errorMessage(e, "Unable to reset the password.")); } finally { setBusy(false); } };
   if (!token || !email) return <PublicAccountPage><h2>Invalid reset link</h2><p className="muted">This link is incomplete. Request a new password reset email.</p><a className="button button-primary button-wide" href="/forgot-password">Request new link</a></PublicAccountPage>;
   return <PublicAccountPage><span className="eyebrow">SECURE PASSWORD RESET</span><h2>{done ? "Password updated" : "Choose a new password"}</h2>{done ? <><p className="muted">Your password has been changed and existing sessions were signed out.</p><a className="button button-primary button-wide" href="/">Sign in</a></> : <form className="stack-form" onSubmit={submit}><p className="muted">Create a password with at least 12 characters.</p><label>New password<input type="password" required minLength={12} autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} /></label><label>Confirm password<input type="password" required minLength={12} autoComplete="new-password" value={confirm} onChange={(e) => setConfirm(e.target.value)} /></label>{error && <div className="form-error" role="alert">{error}</div>}<button className="button button-primary button-wide" disabled={busy}>{busy ? "Updating…" : "Update password"}</button></form>}</PublicAccountPage>;
+}
+
+function PublicEventPage({ token }: { token: string }) {
+  const [event, setEvent] = useState<PublicEventLanding | null>(null);
+  const [status, setStatus] = useState<"loading" | "ready" | "submitted" | "error">("loading");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [form, setForm] = useState({ fullName: "", contactNumber: "", email: "", address: "", preferredLocation: "", sourceOfIncome: "", productLine: "", consentAccepted: false });
+  const [attempted, setAttempted] = useState(false);
+
+  useEffect(() => {
+    api.publicEvents.get(token).then((value) => { setEvent(value); setStatus("ready"); }).catch((e) => { setError(errorMessage(e, "This event link is not available.")); setStatus("error"); });
+  }, [token]);
+
+  const emailValue = form.email.trim();
+  const contactNumberValue = form.contactNumber.trim();
+  const emailMissing = emailValue.length === 0;
+  const contactNumberMissing = contactNumberValue.length === 0;
+  const invalidEmail = !emailMissing && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailValue);
+  const invalidContactNumber = !contactNumberMissing && contactNumberValue.length < 7;
+  const missing = [
+    form.fullName.trim().length < 2 ? "Full name" : null,
+    form.address.trim().length < 5 ? "Address" : null,
+    contactNumberMissing ? "Contact number" : invalidContactNumber ? "Valid contact number" : null,
+    emailMissing ? "Email" : invalidEmail ? "Valid email" : null,
+    !form.consentAccepted ? "Privacy notice" : null,
+  ].filter((value): value is string => Boolean(value));
+
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    setAttempted(true);
+    if (missing.length || !event?.isOpen) return;
+    setBusy(true); setError("");
+    try {
+      await api.publicEvents.register(token, { fullName: form.fullName.trim(), contactNumber: contactNumberValue, email: emailValue.toLowerCase(), address: form.address.trim(), preferredLocation: form.preferredLocation.trim() || null, sourceOfIncome: form.sourceOfIncome.trim() || null, productLine: form.productLine || null, consentAccepted: form.consentAccepted });
+      setStatus("submitted");
+    } catch (err) { setError(errorMessage(err, "We could not submit your details.")); }
+    finally { setBusy(false); }
+  };
+
+  return <main className="public-event-page"><section className="public-event-card">
+    <div className="public-event-brand"><div className="app-mark">DC</div><span className="eyebrow">DR. CARE FRANCHISE OPPORTUNITY</span></div>
+    {status === "loading" && <Loading />}
+    {status === "error" && <><h1>Event link unavailable</h1><p className="form-error">{error}</p><p className="muted">Please scan the event QR code again or ask the event team for a current link.</p></>}
+    {status === "submitted" && <div className="public-event-success"><CheckCircle2 size={32} /><div><h1>Thank you for your interest</h1><p>Your details are with the Dr. Care team. A representative will contact you using the information you provided.</p></div></div>}
+    {status === "ready" && event && <>
+      <div className="public-event-heading"><div><h1>{event.name}</h1><p>{event.description || "Tell us a little about yourself and the location you have in mind."}</p></div><span className={`public-event-status ${event.isOpen ? "open" : "closed"}`}>{event.isOpen ? "Prospect intake open" : "Prospect intake closed"}</span></div>
+      {!event.isOpen ? <div className="public-event-closed"><Clock3 size={20} /><div><strong>{new Date(event.startsAt).getTime() > Date.now() ? "Prospect intake opens soon" : "This event has ended"}</strong><span>{new Date(event.startsAt).getTime() > Date.now() ? `Prospect intake opens ${formatDateTime(event.startsAt)}.` : "Prospect intake is no longer available through this QR code."}</span></div></div> : <form className="public-event-form" onSubmit={submit} noValidate>
+        <div className="public-event-section"><span className="eyebrow">YOUR DETAILS</span><div className="form-grid"><label><span>Full name <b>*</b></span><input required minLength={2} maxLength={160} value={form.fullName} onChange={(e) => setForm({ ...form, fullName: e.target.value })} /></label><label><span>Contact number <b>*</b></span><input required type="tel" maxLength={40} value={form.contactNumber} aria-invalid={attempted && (contactNumberMissing || invalidContactNumber)} className={attempted && (contactNumberMissing || invalidContactNumber) ? "field-missing" : undefined} onChange={(e) => setForm({ ...form, contactNumber: e.target.value })} /></label><label><span>Email <b>*</b></span><input required type="email" maxLength={254} value={form.email} aria-invalid={attempted && (emailMissing || invalidEmail)} className={attempted && (emailMissing || invalidEmail) ? "field-missing" : undefined} onChange={(e) => setForm({ ...form, email: e.target.value })} /></label><label><span>Franchisee address <b>*</b></span><input required minLength={5} maxLength={500} placeholder="Home or registered business address" value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} /><small className="field-hint">Used on the franchise agreement and official records.</small></label></div></div>
+        <div className="public-event-section"><span className="eyebrow">YOUR OPPORTUNITY</span><div className="form-grid"><label className="form-wide"><span>Proposed franchise location <span className="field-optional">(optional)</span></span><input maxLength={240} placeholder="Street, barangay, city, province" value={form.preferredLocation} onChange={(e) => setForm({ ...form, preferredLocation: e.target.value })} /></label><SourceOfIncomeField value={form.sourceOfIncome} onChange={(value) => setForm({ ...form, sourceOfIncome: value })} /><label><span>Lead source</span><input value="Event prospect capture" disabled /></label><label><span>Product line <span className="field-optional">(optional)</span></span><select value={form.productLine} onChange={(e) => setForm({ ...form, productLine: e.target.value })}><option value="">Choose later</option><option value="Abc">ABC Animal Bite Clinic</option><option value="Pharmacy">Pharmacy</option><option value="Combo">ABC + Pharmacy Combo</option></select></label></div></div>
+        <label className="public-event-consent"><input type="checkbox" required checked={form.consentAccepted} onChange={(e) => setForm({ ...form, consentAccepted: e.target.checked })} /><span>I agree that Dr. Care may use these details to contact me about this franchise opportunity. <b>*</b></span></label>
+        {attempted && missing.length > 0 && <div className="form-error" role="alert">Please complete: {missing.join(", ")}.</div>}
+        {error && <div className="form-error" role="alert">{error}</div>}
+        <button className="button button-primary button-wide" disabled={busy}>{busy ? "Submitting…" : "Submit my details"}<ArrowUpRight size={17} /></button>
+        <p className="public-event-footnote"><ShieldCheck size={14} /> Your information is sent securely to the Dr. Care team.</p>
+      </form>}
+    </>}
+  </section></main>;
 }
 
 function trimmedSignatureDataUrl(canvas: HTMLCanvasElement) {
@@ -1377,12 +1399,16 @@ function ContractSignPage({ token }: { token: string }) {
 function Shell({
   user,
   onLogout,
+  onUserChanged,
 }: {
   user: NonNullable<typeof session.user>;
   onLogout: () => void;
+  onUserChanged: (user: NonNullable<typeof session.user>) => void;
 }) {
+  const navigate = useNavigate();
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [switchingRole, setSwitchingRole] = useState(false);
   useEffect(() => {
     void startRealtime().catch(() => undefined);
     return () => {
@@ -1402,6 +1428,21 @@ function Shell({
       window.removeEventListener("keydown", closeOnEscape);
     };
   }, [mobileOpen]);
+  const switchRole = async (event: ChangeEvent<HTMLSelectElement>) => {
+    const nextRole = event.target.value as Role;
+    if (!nextRole || nextRole === user.role) return;
+    setSwitchingRole(true);
+    try {
+      const response = await api.auth.switchRole(nextRole);
+      session.set(response);
+      onUserChanged(response.user);
+      navigate("/", { replace: true });
+    } catch {
+      event.target.value = user.role;
+    } finally {
+      setSwitchingRole(false);
+    }
+  };
   return (
     <div className={`app-shell ${collapsed ? "sidebar-collapsed" : ""}`}>
       <aside className={`sidebar ${mobileOpen ? "mobile-open" : ""}`}>
@@ -1435,7 +1476,7 @@ function Shell({
         </div>
         <nav className="main-nav" aria-label="Main navigation">
           {nav
-            .filter((item) => !item.roles || item.roles.includes(user.role))
+            .filter((item) => !item.roles || hasRole(user.role, item.roles))
             .map((item) => {
               const IconComponent = item.icon;
               return (
@@ -1455,7 +1496,7 @@ function Shell({
             })}
         </nav>
         <div className="sidebar-bottom">
-          <button className="user-menu" onClick={onLogout}>
+          <div className="user-menu">
             <div className="avatar avatar-small">
               {initials(user.displayName)}
             </div>
@@ -1463,8 +1504,18 @@ function Shell({
               <strong>{user.displayName}</strong>
               <small>{roleLabel(user.role)}</small>
             </span>
-            <LogOut size={16} />
-          </button>
+            <button className="icon-button sidebar-logout" onClick={onLogout} aria-label="Sign out">
+              <LogOut size={16} />
+            </button>
+          </div>
+          {(user.roles?.length ?? 0) > 1 && (
+            <label className="sidebar-role-switch">
+              <span>Acting as</span>
+              <select value={user.role} onChange={switchRole} disabled={switchingRole} aria-label="Switch active role">
+                {(user.roles ?? [user.role]).map((role) => <option key={role} value={role}>{roleLabel(role)}</option>)}
+              </select>
+            </label>
+          )}
         </div>
       </aside>
       {mobileOpen && (
@@ -1511,7 +1562,9 @@ function Shell({
             <Route path="/pre-launch" element={<PreLaunchQueue />} />
             <Route path="/handoff" element={<EndorsementsQueue />} />
             <Route path="/reports" element={<Reports />} />
+            <Route path="/events" element={<EventsPage />} />
             <Route path="/settings" element={<SettingsPage />} />
+            <Route path="/users" element={<UserManagementPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </main>
@@ -1522,9 +1575,9 @@ function Shell({
 
 function Dashboard({ user }: { user: NonNullable<typeof session.user> }) {
   if (!hasRole(user.role, pipelineReadRoles))
-    return user.role === "Finance" ? (
+    return hasRole(user.role, ["Finance"]) ? (
       <Navigate to="/finance" replace />
-    ) : user.role === "AdminTeam" ? (
+    ) : hasRole(user.role, ["AdminTeam"]) ? (
       <Navigate to="/handoff" replace />
     ) : (
       <Page
@@ -1549,7 +1602,7 @@ function DashboardContent({
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
   useEffect(() => {
-    Promise.all([api.leads.list("?limit=100&sort=updatedAt"), api.tasks.list()])
+    Promise.all([api.leads.listAll("?sort=updatedAt"), api.tasks.list()])
       .then(([leadResult, taskResult]) => {
         setLeads(leadResult.items);
         setTasks(taskResult);
@@ -1557,18 +1610,21 @@ function DashboardContent({
       .catch(() => undefined)
       .finally(() => setLoading(false));
   }, [realtimeRevision]);
-  const attention = leads
-    .filter((lead) =>
-      [
-        "InquiryIncomplete",
-        "FollowUp",
-        "Qualified",
-        "DownPaymentPending",
-        "ContractReview",
-      ].includes(lead.state),
-    )
-    .slice(0, 5);
+  const attentionLeads = leads.filter(isAttentionLead);
+  const attention = attentionLeads.slice(0, 5);
   const openTasks = tasks.filter((task) => task.status === "Open").length;
+  const qualifiedCount = leads.filter((lead) => lead.state === "Qualified").length;
+  const movingCount = leads.filter((lead) => !isAttentionLead(lead)).length;
+  const overdueCount = leads.filter(isOverdueLead).length;
+  const focusLead = attention[0];
+  const focusStep = focusLead
+    ? nextStepForLead(focusLead, Boolean(focusLead.downPaymentSubmittedForFinance))
+    : null;
+  const focusMessage = loading
+    ? "Reading your operating pulse…"
+    : attention.length
+      ? `${attentionLeads.length} ${attentionLeads.length === 1 ? "opportunity needs" : "opportunities need"} a move today`
+      : "Your pipeline is clear for today";
   return (
     <Page
       title={`Good morning, ${firstName(user.displayName)}.`}
@@ -1579,14 +1635,31 @@ function DashboardContent({
         </NavLink>
       }
     >
-      <section className="hero-strip">
-        <div>
+      <section className="hero-strip dashboard-hero">
+        <div className="dashboard-hero-copy">
           <span className="eyebrow">YOUR OPERATING RHYTHM</span>
           <h2>Make the next right move.</h2>
           <p>
             Keep every franchise opportunity moving with clarity, care, and a
             visible owner.
           </p>
+        </div>
+        <div className="dashboard-hero-insight">
+          <div className="dashboard-hero-insight-top">
+            <span>Today&apos;s focus</span>
+            <span className="dashboard-live-badge"><i /> Live</span>
+          </div>
+          <strong>{focusMessage}</strong>
+          <p>
+            {focusLead
+              ? `${focusLead.fullName} · ${focusStep?.label ?? "Open opportunity"}`
+              : loading
+                ? "Syncing the latest workspace activity."
+                : "No priority work is waiting on your team."}
+          </p>
+          <NavLink to={focusLead ? `/leads/${focusLead.id}` : "/pipeline"}>
+            {focusLead ? "Open priority work" : "Open pipeline"} <ArrowUpRight size={14} />
+          </NavLink>
         </div>
         <div className="hero-orbit">
           <div className="orbit-core">DC</div>
@@ -1595,25 +1668,25 @@ function DashboardContent({
           <span className="orbit-dot three" />
         </div>
       </section>
-      <section className="metric-grid">
+      <section className="metric-grid dashboard-metric-grid">
         <Metric
           label="Active opportunities"
           value={loading ? "—" : String(leads.length)}
-          hint="Across your pipeline"
+          hint="Across the full pipeline"
           icon={BriefcaseBusiness}
           tone="red"
         />
         <Metric
           label="Need attention"
-          value={loading ? "—" : String(attention.length)}
-          hint="Priority work items"
+          value={loading ? "—" : String(attentionLeads.length)}
+          hint={overdueCount ? `${overdueCount} overdue` : "Priority work items"}
           icon={Clock3}
           tone="amber"
         />
         <Metric
           label="Open tasks"
           value={loading ? "—" : String(openTasks)}
-          hint="Assigned to your team"
+          hint="Assigned work to clear"
           icon={ListChecks}
           tone="blue"
         />
@@ -1623,22 +1696,22 @@ function DashboardContent({
             loading
               ? "—"
               : String(
-                  leads.filter((lead) => lead.state === "Qualified").length,
+                  qualifiedCount,
                 )
           }
-          hint="Ready for the next step"
+          hint={loading ? "Ready for the next step" : `${movingCount} moving forward`}
           icon={CheckCircle2}
           tone="green"
         />
       </section>
       <div className="dashboard-grid">
-        <section className="panel attention-panel">
+        <section className="panel attention-panel dashboard-focus-panel">
           <PanelHeader
-            title="Needs your attention"
+            title="Next best moves"
             subtitle="The work most likely to move the pipeline today."
             action={
               <NavLink to="/pipeline" className="text-link">
-                View pipeline <ArrowUpRight size={14} />
+                View all <ArrowUpRight size={14} />
               </NavLink>
             }
           />
@@ -1656,11 +1729,28 @@ function DashboardContent({
             </div>
           )}
         </section>
-        <section className="panel pulse-panel">
+        <section className="panel pulse-panel dashboard-pulse-panel">
           <PanelHeader
-            title="Pipeline pulse"
+            title="Pipeline health"
             subtitle="Where opportunities are sitting right now."
+            action={
+              <span className="dashboard-total-badge">
+                {loading ? "—" : `${leads.length} total`}
+              </span>
+            }
           />
+          <div className="dashboard-pulse-summary">
+            <div>
+              <span>Moving forward</span>
+              <strong>{loading ? "—" : movingCount}</strong>
+            </div>
+            <div>
+              <span>Needs a move</span>
+              <strong className={attentionLeads.length ? "has-attention" : ""}>
+                {loading ? "—" : attentionLeads.length}
+              </strong>
+            </div>
+          </div>
           <div className="pulse-list">
             {states.slice(0, 6).map((state) => {
               const count = leads.filter(
@@ -1721,7 +1811,7 @@ function PipelineContent({
       new URLSearchParams(window.location.search).get("search") ?? "";
     setSearch(query);
     api.leads
-      .list("?limit=100&sort=updatedAt")
+      .listAll("?sort=updatedAt")
       .then((result) => setLeads(result.items))
       .catch((e) =>
         setNotice({
@@ -1766,10 +1856,10 @@ function PipelineContent({
   }[] = [
     {
       value: "all",
-      label: user.role === "MarketingAgent" ? "My opportunities" : "All opportunities",
+      label: canonicalRole(user.role) === "SalesAgent" ? "My opportunities" : "All opportunities",
       count: leads.length,
     },
-    ...(user.role === "MarketingAgent"
+    ...(canonicalRole(user.role) === "SalesAgent"
       ? []
       : [
           {
@@ -1880,19 +1970,21 @@ function PipelineContent({
                 className={`kanban-column ${stageLeads.length ? "has-cards" : "is-empty"}`}
                 key={stage.key}
               >
-                <div className="column-heading">
-                  <div className="column-title">
-                    <span className={`state-dot ${stage.tone}`} />
-                    <strong>{stage.label}</strong>
-                    <span className="count-badge">{stageLeads.length}</span>
+                <div className="kanban-column-header">
+                  <div className="column-heading">
+                    <div className="column-title">
+                      <span className={`state-dot ${stage.tone}`} />
+                      <strong>{stage.label}</strong>
+                      <span className="count-badge">{stageLeads.length}</span>
+                    </div>
                   </div>
+                  <p className="column-description">{stage.description}</p>
+                  {attentionCount > 0 && (
+                    <span className="column-attention">
+                      {attentionCount} needs attention
+                    </span>
+                  )}
                 </div>
-                <p className="column-description">{stage.description}</p>
-                {attentionCount > 0 && (
-                  <span className="column-attention">
-                    {attentionCount} needs attention
-                  </span>
-                )}
                 <div className="column-cards">
                   {stageLeads.map((lead) => (
                     <LeadCard
@@ -1976,7 +2068,6 @@ function LeadDetailContent() {
     "Activities",
     "Documents",
     ...(hasRole(session.user?.role, [
-      "MarketingAdmin",
       "GeneralManager",
       "Leadership",
       "AdminTeam",
@@ -1995,12 +2086,13 @@ function LeadDetailContent() {
   });
   const [error, setError] = useState("");
   const [activityOpen, setActivityOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
   const [taskOpen, setTaskOpen] = useState(false);
   const [assignmentOpen, setAssignmentOpen] = useState(false);
   const [assignmentBusy, setAssignmentBusy] = useState(false);
   const [assignmentId, setAssignmentId] = useState("");
   const [assignees, setAssignees] = useState<
-    { id: string; displayName: string; role: string; isActive: boolean }[]
+    { id: string; displayName: string; role: Role; roles?: Role[]; isActive: boolean }[]
   >([]);
   const [notice, setNotice] = useState<Notice | null>(null);
   const loadActivities = async (page = 1) => {
@@ -2020,11 +2112,10 @@ function LeadDetailContent() {
     try {
       const nextLead = await api.leads.get(leadId);
       if (
-        session.user?.role === "Finance" ||
-        session.user?.role === "AdminTeam"
+          hasRole(session.user?.role, ["Finance", "AdminTeam"])
       ) {
         const nextPayment =
-          session.user.role === "Finance" &&
+          hasRole(session.user?.role, ["Finance"]) &&
           ["Qualified", "DownPaymentPending"].includes(nextLead.state)
             ? await api.leads.downPayment(leadId).catch(() => null)
             : null;
@@ -2159,6 +2250,19 @@ function LeadDetailContent() {
     setNotice({ message: "Activity added.", tone: "success" });
     await load();
   };
+  const saveLeadDetails = async (payload: unknown) => {
+    try {
+      await api.leads.updateDetails(lead.id, {
+        ...(payload as Record<string, unknown>),
+        expectedVersion: lead.version,
+      });
+      setEditOpen(false);
+      setNotice({ message: "Lead details updated.", tone: "success" });
+      await load();
+    } catch (e) {
+      setNotice({ message: errorMessage(e, "Unable to update lead details."), tone: "error" });
+    }
+  };
   const saveTask = async (payload: unknown) => {
     await api.leads.createTask(lead.id, payload);
     setTaskOpen(false);
@@ -2169,12 +2273,14 @@ function LeadDetailContent() {
     setAssignmentOpen(true);
     setAssignmentId(lead.assignedAgentId);
     try {
-      const users = (await api.users.list()) as typeof assignees;
+      const users = (await api.users.list("?page=1&pageSize=100")).items as typeof assignees;
       setAssignees(
         users.filter(
           (user) =>
             user.isActive &&
-            ["MarketingAgent", "MarketingAdmin"].includes(user.role),
+            (user.roles ?? [user.role]).some((role) =>
+              canonicalRole(role) === "SalesAgent",
+            ),
         ),
       );
     } catch (e) {
@@ -2246,12 +2352,20 @@ function LeadDetailContent() {
           {canEditLead && (
             <button
               className="button button-secondary"
+              onClick={() => setEditOpen(true)}
+            >
+              <Pencil size={16} /> Edit lead
+            </button>
+          )}
+          {canEditLead && (
+            <button
+              className="button button-secondary"
               onClick={() => setActivityOpen(true)}
             >
               <Plus size={16} /> Add activity
             </button>
           )}
-          {session.user?.role === "MarketingAdmin" && lead.state !== "EndorsedToAdmin" && (
+          {hasRole(session.user?.role, ["GeneralManager"]) && !["EndorsedToAdmin", "Acknowledged"].includes(lead.state) && (
             <button className="button button-secondary" onClick={openAssignment}>
               <UsersRound size={16} /> Change owner
             </button>
@@ -2379,6 +2493,19 @@ function LeadDetailContent() {
           <ActivityForm onSubmit={saveActivity} submitLabel="Save activity" />
         </Modal>
       )}
+      {editOpen && (
+        <Modal
+          title="Edit lead details"
+          subtitle="Keep the record complete. Changes are saved to the activity history."
+          onClose={() => setEditOpen(false)}
+        >
+          <LeadDetailsEditForm
+            lead={lead}
+            onSubmit={saveLeadDetails}
+            onCancel={() => setEditOpen(false)}
+          />
+        </Modal>
+      )}
       {taskOpen && (
         <Modal
           title="Schedule follow-up"
@@ -2395,7 +2522,7 @@ function LeadDetailContent() {
       {assignmentOpen && (
         <Modal
           title="Change opportunity owner"
-          subtitle="Marketing Admins can assign an opportunity to an active agent or Marketing Admin, including themselves."
+          subtitle="The General Manager can assign an opportunity to an active Sales Agent."
           onClose={() => setAssignmentOpen(false)}
         >
           <form className="stack-form" onSubmit={saveAssignment}>
@@ -2432,16 +2559,17 @@ function canPerformPrimaryWorkflowAction(lead: Lead) {
   if (!role) return false;
   if (lead.state === "Qualified") return hasRole(role, marketingWriteRoles);
   if (lead.state === "DownPaymentPending")
-    return role === "Finance" || hasRole(role, marketingWriteRoles);
+    return hasRole(role, ["Finance"]) || hasRole(role, marketingWriteRoles);
   if (
     lead.state === "DownPaymentConfirmed" ||
     lead.state === "ContractDrafting"
   )
-    return role === "MarketingAdmin";
-  if (lead.state === "ContractReview") return role === "GeneralManager";
+    return hasRole(role, marketingWriteRoles);
+  if (lead.state === "ContractReview") return hasRole(role, ["GeneralManager"]);
   if (lead.state === "ContractSigned" || lead.state === "PreLaunch")
     return hasRole(role, marketingWriteRoles);
-  if (lead.state === "EndorsedToAdmin") return role === "AdminTeam";
+  if (lead.state === "EndorsedToAdmin") return hasRole(role, ["AdminTeam"]);
+  if (lead.state === "Acknowledged") return false;
   return hasRole(role, leadWriteRoles);
 }
 
@@ -2463,8 +2591,12 @@ function WorkflowActionArea({
   onSchedule: () => void;
 }) {
   const canManageTasks = hasRole(session.user?.role, marketingWriteRoles);
-  const [handoffAcknowledged, setHandoffAcknowledged] = useState(false);
+  const [handoffAcknowledged, setHandoffAcknowledged] = useState(lead.state === "Acknowledged");
   useEffect(() => {
+    if (lead.state === "Acknowledged") {
+      setHandoffAcknowledged(true);
+      return;
+    }
     if (lead.state !== "EndorsedToAdmin") {
       setHandoffAcknowledged(false);
       return;
@@ -2552,8 +2684,12 @@ function LeadWorkflowProgress({
   payment?: Record<string, unknown> | null;
   onSelect: (tab: string) => void;
 }) {
-  const [handoffAcknowledged, setHandoffAcknowledged] = useState(false);
+  const [handoffAcknowledged, setHandoffAcknowledged] = useState(lead.state === "Acknowledged");
   useEffect(() => {
+    if (lead.state === "Acknowledged") {
+      setHandoffAcknowledged(true);
+      return;
+    }
     if (lead.state !== "EndorsedToAdmin") {
       setHandoffAcknowledged(false);
       return;
@@ -2903,11 +3039,11 @@ function LeadTab({
     ) : (
       <ReadOnlyWorkflowPanel
         title="Generate invoice"
-        text="Invoice generation is restricted to the Agent and Marketing Admin roles."
+        text="Invoice generation is restricted to the Sales Agent and General Manager roles."
       />
     );
   if (tab === "Payment confirmation")
-    return session.user?.role === "Finance" ? (
+    return hasRole(session.user?.role, ["Finance"]) ? (
       <FinanceConfirmationPanel
         lead={lead}
         onReload={onReload}
@@ -2976,7 +3112,6 @@ function LeadTab({
       />
     );
   return hasRole(session.user?.role, [
-    "MarketingAdmin",
     "GeneralManager",
     "Leadership",
     "AdminTeam",
@@ -3309,13 +3444,14 @@ function WorkflowPanel({
   const preparationActive = currentStage.label === "Invoice & Documents";
   const financeActive = currentStage.label === "Finance verification";
   const contractActive = currentStage.label === "Contract";
-  const handoffActive = lead.state === "EndorsedToAdmin";
+  const handoffActive = lead.state === "EndorsedToAdmin" || lead.state === "Acknowledged";
   const [contract, setContract] = useState<Contract | null>(null);
   const [endorsement, setEndorsement] = useState<Record<string, unknown> | null>(null);
   const [documentsReadyForLead, setDocumentsReadyForLead] = useState<string | null>(null);
   const handoffAcknowledged =
-    handoffActive &&
-    String(endorsement?.status ?? "").toLowerCase() === "acknowledged";
+    lead.state === "Acknowledged" ||
+    (lead.state === "EndorsedToAdmin" &&
+      String(endorsement?.status ?? "").toLowerCase() === "acknowledged");
   useEffect(() => {
     if (!handoffActive) {
       setEndorsement(null);
@@ -3325,7 +3461,7 @@ function WorkflowPanel({
       .endorsement(lead.id)
       .then((value) => setEndorsement(value as Record<string, unknown>))
       .catch(() => setEndorsement(null));
-  }, [handoffActive, lead.id]);
+  }, [handoffActive, lead.state, lead.id]);
   const documentsComplete =
     Boolean(payment?.documentsComplete) || documentsReadyForLead === lead.id;
   const invoiceGenerated = ["Invoiced", "Confirmed"].includes(
@@ -3416,7 +3552,7 @@ function WorkflowPanel({
     : financeActive
       ? "Finance-owned"
       : contractActive
-        ? "Marketing Admin"
+        ? "General Manager"
         : `${nextActionOwnerForLead(lead, Boolean(payment?.submittedForFinance))} owned`;
   const amount = payment
     ? `₱${Number(payment.amount).toLocaleString()}`
@@ -3461,7 +3597,7 @@ function WorkflowPanel({
         />
       );
     if (["Qualified", "DownPaymentPending"].includes(lead.state)) {
-      if (session.user?.role === "Finance")
+      if (hasRole(session.user?.role, ["Finance"]))
         return (
           <FinanceConfirmationPanel
             lead={lead}
@@ -3475,9 +3611,9 @@ function WorkflowPanel({
         payment?.submittedForFinance
       )
         return (
-          <ReadOnlyWorkflowPanel
-            title="Finance verification"
-            text="The invoice and required document are complete. Finance must verify and confirm the down payment."
+          <FinanceAwaitingPanel
+            payment={payment}
+            documentsComplete={documentsComplete}
           />
         );
       return hasRole(session.user?.role, marketingWriteRoles) ? (
@@ -3492,7 +3628,7 @@ function WorkflowPanel({
       ) : (
         <ReadOnlyWorkflowPanel
           title="Finance"
-          text="Invoice preparation is available to the authorized marketing team. Finance verifies payment."
+          text="Invoice preparation is available to the Sales Agent or General Manager. Finance verifies payment."
         />
       );
     }
@@ -3512,8 +3648,15 @@ function WorkflowPanel({
       return (
         <PreLaunchPanel lead={lead} onReload={onReload} onNotice={onNotice} />
       );
+    if (lead.state === "Acknowledged")
+      return (
+        <ReadOnlyWorkflowPanel
+          title="Handoff acknowledged"
+          text="The Admin Team has acknowledged ownership. Downstream onboarding can continue."
+        />
+      );
     if (lead.state === "EndorsedToAdmin")
-      return session.user?.role === "AdminTeam" ? (
+      return hasRole(session.user?.role, ["AdminTeam"]) ? (
         <AdminEndorsementPanel lead={lead} onNotice={onNotice} />
       ) : hasRole(session.user?.role, marketingWriteRoles) ? (
         <EndorsementPanel lead={lead} onReload={onReload} onNotice={onNotice} />
@@ -3616,7 +3759,7 @@ function WorkflowPanel({
                 </div>
                 <div>
                   <dt>Owner</dt>
-                  <dd>Marketing Admin</dd>
+                  <dd>General Manager</dd>
                 </div>
                 <div>
                   <dt>Payment</dt>
@@ -3631,11 +3774,11 @@ function WorkflowPanel({
               <dl className="workflow-detail-list">
                 <div>
                   <dt>Receiving team</dt>
-                  <dd>{String(endorsement?.receivingTeam ?? "Admin Team")}</dd>
+                  <dd>{roleLabel(String(endorsement?.receivingTeam ?? "Admin Team"))}</dd>
                 </div>
                 <div>
                   <dt>Status</dt>
-                  <dd>{statusLabel(String(endorsement?.status ?? "Pending"))}</dd>
+                  <dd>{statusLabel(String(endorsement?.status ?? (lead.state === "Acknowledged" ? "Acknowledged" : "Pending")))}</dd>
                 </div>
                 <div>
                   <dt>Handoff created</dt>
@@ -3643,7 +3786,7 @@ function WorkflowPanel({
                 </div>
                 <div>
                   <dt>Acknowledged</dt>
-                  <dd>{endorsement?.acknowledgedAt ? formatDate(String(endorsement.acknowledgedAt)) : "Awaiting Admin Team"}</dd>
+                  <dd>{endorsement?.acknowledgedAt ? formatDate(String(endorsement.acknowledgedAt)) : lead.state === "Acknowledged" ? "Acknowledged" : "Awaiting Admin Team"}</dd>
                 </div>
               </dl>
             ) : (
@@ -3785,6 +3928,82 @@ function WorkflowPanel({
   );
 }
 
+function FinanceAwaitingPanel({
+  payment,
+  documentsComplete,
+}: {
+  payment?: Record<string, unknown> | null;
+  documentsComplete: boolean;
+}) {
+  const invoiceNumber = String(payment?.invoiceNumber ?? "Issued invoice");
+  const submittedAt = payment?.submittedAt
+    ? formatDate(String(payment.submittedAt))
+    : null;
+  return (
+    <section className="panel tab-panel finance-awaiting-panel">
+      <div className="finance-awaiting-heading">
+        <div>
+          <h3>Finance verification</h3>
+          <p>This step is handled by the Finance team.</p>
+        </div>
+        <span className="finance-awaiting-status">
+          <Clock3 size={18} /> Awaiting Finance
+        </span>
+      </div>
+
+      <div className="finance-awaiting-callout">
+        <ShieldCheck size={32} />
+        <strong>Finance will verify and confirm the down payment before this workflow can continue.</strong>
+      </div>
+
+      <div className="finance-awaiting-checklist">
+        <div className="finance-awaiting-check complete">
+          <CheckCircle2 size={22} />
+          <div>
+            <strong>Invoice generated</strong>
+            <span>{invoiceNumber}</span>
+          </div>
+          <em>Completed</em>
+        </div>
+        <div className={`finance-awaiting-check ${documentsComplete ? "complete" : "pending"}`}>
+          {documentsComplete ? <CheckCircle2 size={22} /> : <Clock3 size={22} />}
+          <div>
+            <strong>Required document complete</strong>
+            <span>Valid ID and specimen signatures</span>
+          </div>
+          <em>{documentsComplete ? "Completed" : "Pending"}</em>
+        </div>
+        <div className="finance-awaiting-check pending">
+          <Clock3 size={22} />
+          <div>
+            <strong>Down payment verification pending</strong>
+            <span>{submittedAt ? `Submitted to Finance · ${submittedAt}` : "Submitted payment awaiting review"}</span>
+          </div>
+          <em>Pending</em>
+        </div>
+      </div>
+
+      <div className="finance-awaiting-next">
+        <span className="finance-awaiting-next-icon"><UsersRound size={22} /></span>
+        <div>
+          <strong>Next action</strong>
+          <p>Finance will review the submitted payment and confirm the down payment before the workflow can continue.</p>
+        </div>
+      </div>
+
+      <div className="finance-awaiting-owner">
+        <UsersRound size={20} />
+        <span>Assigned to: <strong>Finance team</strong></span>
+      </div>
+
+      <div className="finance-awaiting-footer">
+        <Bell size={19} />
+        <span>You’ll be notified once Finance completes this step.</span>
+      </div>
+    </section>
+  );
+}
+
 function ReadOnlyWorkflowPanel({
   title,
   text,
@@ -3832,7 +4051,7 @@ function DownPaymentOverviewPanel({
   const confirmed = status === "Confirmed";
   const documentsComplete = Boolean(payment?.documentsComplete);
   const canPrepare = hasRole(role, marketingWriteRoles) && !confirmed;
-  const canConfirm = role === "Finance" && invoiced;
+  const canConfirm = hasRole(role, ["Finance"]) && invoiced;
   return (
     <section className="panel tab-panel">
       <PanelHeader
@@ -3846,7 +4065,7 @@ function DownPaymentOverviewPanel({
           signatures in Documents.
         </span>
         <span>
-          2. Marketing confirms the down payment amount and generates the
+          2. The Sales Agent confirms the down payment amount and generates the
           invoice.
         </span>
         <span>
@@ -3930,6 +4149,7 @@ function InvoiceOnlyPanel({
 }) {
   const [payment, setPayment] = useState<Record<string, unknown> | null>(null);
   const [documentsComplete, setDocumentsComplete] = useState(false);
+  const [paymentProofComplete, setPaymentProofComplete] = useState(false);
   const [amount, setAmount] = useState("50000");
   const [busy, setBusy] = useState(false);
   const reload = async () => {
@@ -3954,6 +4174,7 @@ function InvoiceOnlyPanel({
     );
     const complete = hasRequiredDocuments(documentResult);
     setDocumentsComplete(complete);
+    setPaymentProofComplete(documentResult.some((item) => item.documentType === "PAYMENT_RECEIPT" && item.status === "Uploaded"));
     onDocumentsComplete?.(complete);
   };
 
@@ -4034,18 +4255,18 @@ function InvoiceOnlyPanel({
                 ? "Payment verified"
                 : submitted
                   ? "Submitted to Finance"
-                  : documentsComplete
-                    ? "Submit to Finance"
-                    : "Upload required documents"}
+                : documentsComplete && paymentProofComplete
+                  ? "Submit to Finance"
+                  : "Complete payment package"}
             </h3>
             <p>
               {confirmed
                 ? "Finance has verified the payment."
                 : submitted
                   ? "The completed package is with Finance for payment verification."
-                  : documentsComplete
-                    ? "The invoice and required document are complete. Submit the package to Finance for verification."
-                    : "Upload the combined valid ID and signature scan before submitting the package to Finance."}
+                : documentsComplete && paymentProofComplete
+                  ? "The invoice, identity documents, and payment proof are complete. Submit the package to Finance for verification."
+                  : "Upload the identity documents and payment proof before submitting the package to Finance."}
             </p>
           </div>
           <div className="process-card invoice-action-card">
@@ -4075,6 +4296,16 @@ function InvoiceOnlyPanel({
                     <CheckCircle2 size={18} />
                     <div><strong>Invoice generated</strong><small>{String(payment?.invoiceNumber ?? "Down payment invoice")} · {String(payment?.currency ?? "PHP")} {Number(payment?.amount ?? 0).toLocaleString("en-PH", { minimumFractionDigits: 2 })}</small></div>
                   </div>
+                  <DocumentsPanel
+                    lead={lead}
+                    onNotice={onNotice}
+                    onDocumentsChanged={reload}
+                    embedded
+                    fixedDocumentType="PAYMENT_RECEIPT"
+                    visibleTypes={["PAYMENT_RECEIPT"]}
+                    compactAfterUpload
+                    documentCard
+                  />
                 </div>
                 <DocumentsPanel
                   lead={lead}
@@ -4086,10 +4317,11 @@ function InvoiceOnlyPanel({
                   hideUpload
                   collapsible
                   uploadedOnly
+                  documentCard
                 />
                 <div className="button-row finance-submit-actions">
                   <button className="button button-secondary" onClick={openInvoice}><FileText size={16} /> Open invoice</button>
-                  <button className="button button-primary" onClick={submitToFinance} disabled={busy || !documentsComplete}>
+                  <button className="button button-primary" onClick={submitToFinance} disabled={busy || !documentsComplete || !paymentProofComplete}>
                     {busy ? "Submitting…" : "Submit complete package to Finance"}<ChevronRight size={16} />
                   </button>
                 </div>
@@ -4103,88 +4335,95 @@ function InvoiceOnlyPanel({
     <>
       <section className="panel tab-panel">
         <PanelHeader
-          title={documentsComplete ? "Generate down payment invoice" : "Upload required documents"}
+          title="Generate down payment invoice"
           subtitle={
-            documentsComplete
-              ? "The required document is complete. Confirm the amount and generate the invoice."
-              : "Upload the combined valid ID and three specimen signatures file before generating the invoice."
+            "Confirm the amount and generate the invoice first. Upload identity documents and payment proof before submitting to Finance."
           }
         />
         <div className="workflow-instructions">
           <strong>What happens next</strong>
           <span>
-            1. Upload one scanned file containing the valid ID and three
-            specimen signatures.
+            1. Confirm the down payment amount and generate the invoice.
           </span>
           <span>
-            2. Confirm the down payment amount and generate the invoice.
+            2. Upload one scanned file containing the valid ID and three specimen signatures.
           </span>
           <span>
-            3. Submit the completed invoice and document package to Finance for
+            3. Upload payment proof, then submit the completed package to Finance for
             verification.
           </span>
         </div>
-        <div className="process-card">
-          <div className="invoice-document-checklist">
-            <span className="eyebrow">DOCUMENT CHECKLIST</span>
-            <div className={documentsComplete ? "complete" : ""}>
+        <div className="process-card invoice-prerequisites-card">
+          <div className="invoice-prerequisites-heading">
+            <div>
+              <span className="eyebrow">DOCUMENT CHECKLIST</span>
+              <h3>Invoice prerequisites</h3>
+              <p>Confirm the required identity document before generating an invoice.</p>
+            </div>
+            <div className={`invoice-prerequisites-status ${documentsComplete ? "complete" : ""}`}>
               <CheckCircle2 size={17} />
-              <strong>Valid ID with 3 specimen signatures</strong>
+              {documentsComplete ? "1 of 1 requirement met" : "0 of 1 requirement met"}
             </div>
           </div>
-          {!documentsComplete && (
-            <div className="invoice-upload-label eyebrow">UPLOAD REQUIRED FILE</div>
-          )}
-          <DocumentsPanel
-            lead={lead}
-            onNotice={onNotice}
-            onDocumentsChanged={reload}
-            embedded
-            fixedDocumentType="VALID_ID_SIGNATURES"
-            visibleTypes={[
-              "VALID_ID_SIGNATURES",
-              "VALID_ID",
-              "SPECIMEN_SIGNATURE_1",
-              "SPECIMEN_SIGNATURE_2",
-              "SPECIMEN_SIGNATURE_3",
-            ]}
-            hideUpload={documentsComplete}
-            collapsible={documentsComplete}
-            uploadedOnly={documentsComplete}
-          />
-          {documentsComplete ? (
-            <>
-              <div className="completion-card">
-                <CheckCircle2 size={19} />
-                <div>
-                  <strong>Required document complete</strong>
-                  <span>You can now confirm the amount and generate the invoice.</span>
-                </div>
-              </div>
-              <div className="inline-form">
-                <label>
-                  Amount
+
+          <div className={`invoice-prerequisite-row ${documentsComplete ? "complete" : ""}`}>
+            <span className="invoice-prerequisite-icon"><CheckCircle2 size={18} /></span>
+            <div>
+              <strong>Valid ID with 3 specimen signatures</strong>
+              <small>Required identity verification document</small>
+            </div>
+            <span className="invoice-prerequisite-state">{documentsComplete ? "Complete" : "Required"}</span>
+          </div>
+
+          <div className="invoice-prerequisites-section">
+            <span className="eyebrow">IDENTITY DOCUMENT</span>
+            <DocumentsPanel
+              lead={lead}
+              onNotice={onNotice}
+              onDocumentsChanged={reload}
+              embedded
+              fixedDocumentType="VALID_ID_SIGNATURES"
+              visibleTypes={[
+                "VALID_ID_SIGNATURES",
+                "VALID_ID",
+                "SPECIMEN_SIGNATURE_1",
+                "SPECIMEN_SIGNATURE_2",
+                "SPECIMEN_SIGNATURE_3",
+              ]}
+              documentCard
+              compactAfterUpload
+            />
+          </div>
+
+          <div className="invoice-prerequisites-divider" />
+
+          <div className="invoice-generation-section">
+            <h3>Generate invoice</h3>
+            <p>Set the invoice amount. The invoice can be generated once the requirement above is complete.</p>
+            <div className="invoice-generation-row">
+              <label>
+                <span>Invoice amount</span>
+                <div className="invoice-amount-input">
+                  <span>₱</span>
                   <input
                     type="number"
                     min="1"
                     value={amount}
                     onChange={(e) => setAmount(e.target.value)}
                   />
-                </label>
-                <button
-                  className="button button-primary"
-                  onClick={generateInvoice}
-                  disabled={busy || Number(amount) <= 0}
-                >
-                  {busy ? "Generating…" : "Generate invoice"}
-                </button>
-              </div>
-            </>
-          ) : (
-            <div className="read-only-note">
-              <ShieldCheck size={16} /> Upload the required document to unlock invoice generation.
+                </div>
+                <small>Amount will be used as the invoice total.</small>
+              </label>
+              <button
+                className="button button-primary"
+                onClick={generateInvoice}
+                disabled={busy || Number(amount) <= 0 || !documentsComplete}
+              >
+                {busy ? "Generating…" : "Generate invoice"}
+                <ChevronRight size={17} />
+              </button>
             </div>
-          )}
+          </div>
         </div>
       </section>
     </>
@@ -4202,6 +4441,7 @@ function FinanceConfirmationPanel({
 }) {
   const [payment, setPayment] = useState<Record<string, unknown> | null>(null);
   const [documents, setDocuments] = useState<DocumentItem[]>([]);
+  const [paymentEvidenceComplete, setPaymentEvidenceComplete] = useState(false);
   const [loading, setLoading] = useState(true);
   const [reference, setReference] = useState("");
   const [referenceTouched, setReferenceTouched] = useState(false);
@@ -4215,9 +4455,11 @@ function FinanceConfirmationPanel({
       ]);
       setPayment(paymentResult as Record<string, unknown>);
       setDocuments(documentResult);
+      setPaymentEvidenceComplete(documentResult.some((item) => item.documentType === "PAYMENT_RECEIPT" && item.status === "Uploaded"));
     } catch {
       setPayment(null);
       setDocuments([]);
+      setPaymentEvidenceComplete(false);
     } finally {
       setLoading(false);
     }
@@ -4251,10 +4493,17 @@ function FinanceConfirmationPanel({
       });
       return;
     }
+    if (!paymentEvidenceComplete) {
+      onNotice({
+        message: "Payment cannot be confirmed until the Sales Agent uploads payment proof.",
+        tone: "error",
+      });
+      return;
+    }
     if (!payment.submittedForFinance) {
       onNotice({
         message:
-          "The Agent must submit the completed down payment package to Finance first.",
+          "The Sales Agent must submit the completed down payment package to Finance first.",
         tone: "error",
       });
       return;
@@ -4359,7 +4608,7 @@ function FinanceConfirmationPanel({
             <div>
               <strong>Payment confirmed</strong>
               <span>
-                This Finance step is complete. Marketing Admin can now prepare
+                This Finance step is complete. The Sales Agent can now prepare
                 the contract.
                 {Boolean(payment?.confirmedAt) &&
                   ` · ${formatDate(String(payment.confirmedAt))}`}
@@ -4373,8 +4622,8 @@ function FinanceConfirmationPanel({
                 <span className="eyebrow">PAYMENT EVIDENCE</span>
                 <h3>Receipt or bank confirmation</h3>
                 <p>
-                  Attach a screenshot, photo, or PDF so this verification has
-                  supporting evidence.
+                  The Sales Agent uploads a screenshot, photo, or PDF. Review
+                  the evidence here before confirming the payment.
                 </p>
               </div>
               <DocumentsPanel
@@ -4410,7 +4659,7 @@ function FinanceConfirmationPanel({
               <button
                 className="button button-primary"
                 onClick={confirmPayment}
-                disabled={busy}
+                disabled={busy || !payment.documentsComplete || !paymentEvidenceComplete}
               >
                 {busy ? "Confirming…" : "Confirm payment"}
               </button>
@@ -4418,8 +4667,13 @@ function FinanceConfirmationPanel({
             {!payment.documentsComplete && (
               <div className="read-only-note">
                 <ShieldCheck size={16} /> Payment confirmation is blocked until
-                Marketing uploads:{" "}
+                the Sales Agent uploads:{" "}
                 {missingDocuments.map(([, label]) => label).join(", ")}.
+              </div>
+            )}
+            {payment.documentsComplete && !paymentEvidenceComplete && (
+              <div className="read-only-note">
+                <ShieldCheck size={16} /> Waiting for the Sales Agent to upload payment proof.
               </div>
             )}
           </>
@@ -4429,7 +4683,7 @@ function FinanceConfirmationPanel({
             {payment
               ? submitted
                 ? "An invoiced payment is required before confirmation."
-                : "Waiting for the Agent to submit the invoice and required documents to Finance."
+                : "Waiting for the Sales Agent to submit the invoice and required documents to Finance."
               : "No invoice is ready for confirmation."}
             {payment && !payment.documentsComplete
               ? " Required documents are still missing."
@@ -4464,6 +4718,7 @@ function InquiryPanel({
   });
   const [inquiryLead, setInquiryLead] = useState<Lead>(lead);
   const [loading, setLoading] = useState(false);
+  const [attempted, setAttempted] = useState(false);
 
   const loadInquiry = async () => {
     const item = await api.leads.getInquiry(lead.id);
@@ -4504,6 +4759,7 @@ function InquiryPanel({
 
   const save = async (event: FormEvent) => {
     event.preventDefault();
+    setAttempted(true);
     setLoading(true);
     try {
       const currentLead = await ensureInquiryStarted();
@@ -4537,8 +4793,6 @@ function InquiryPanel({
     form.contactNumber.trim() ? null : "Contact number",
     form.email.trim() ? null : "Email",
     form.sourceOfIncome.trim() ? null : "Source of income",
-    form.address.trim() ? null : "Franchisee address",
-    form.preferredLocation.trim() ? null : "Proposed location",
   ].filter((item): item is string => Boolean(item));
 
   if (!["New", "Inquiry", "InquiryIncomplete"].includes(lead.state))
@@ -4603,60 +4857,59 @@ function InquiryPanel({
               {label}
               {required ? <span className="required-mark"> *</span> : null}
             </span>
-            <input
-              value={form[key as keyof typeof form]}
-              onChange={(e) =>
-                setForm((current) => ({ ...current, [key]: e.target.value }))
-              }
-              type={
-                key === "age"
-                  ? "number"
-                  : key === "email"
-                    ? "email"
-                    : key === "meetingDateTime"
-                      ? "datetime-local"
-                      : "text"
-              }
-              required={Boolean(required)}
-              aria-invalid={required && !form[key].trim()}
-              className={required && !form[key].trim() ? "field-missing" : undefined}
-            />
-            {required && !form[key].trim() ? (
+            {key === "meetingDateTime" ? (
+              <BrandedDateTimePicker
+                value={form.meetingDateTime}
+                onChange={(meetingDateTime) =>
+                  setForm((current) => ({ ...current, meetingDateTime }))
+                }
+              />
+            ) : (
+              <input
+                value={form[key as keyof typeof form]}
+                onChange={(e) =>
+                  setForm((current) => ({ ...current, [key]: e.target.value }))
+                }
+                type={key === "age" ? "number" : key === "email" ? "email" : "text"}
+                required={Boolean(required)}
+                aria-invalid={attempted && required && !form[key].trim()}
+                className={attempted && required && !form[key].trim() ? "field-missing" : undefined}
+              />
+            )}
+            {attempted && required && !form[key].trim() ? (
               <small className="field-error">{label} is required.</small>
             ) : null}
           </label>
           ))}
         <div className="form-wide">
-          <LocationPicker
-            label="Proposed franchise location"
-            value={form.preferredLocation}
-            onChange={(preferredLocation) =>
-              setForm((current) => ({ ...current, preferredLocation }))
-            }
-            required
-            invalid={!form.preferredLocation.trim()}
-            help="This location is used for the location assessment and agreement."
-          />
+          <label>
+            <span>
+              Proposed franchise location <span className="field-optional">(optional)</span>
+            </span>
+            <input
+              value={form.preferredLocation}
+              onChange={(event) =>
+                setForm((current) => ({ ...current, preferredLocation: event.target.value }))
+              }
+              maxLength={240}
+              placeholder="Street, barangay, city, province"
+            />
+          </label>
         </div>
         <label>
           <span>
-            Franchisee address <span className="required-mark"> *</span>
+            Franchisee address <span className="field-optional">(optional for now)</span>
           </span>
           <input
             value={form.address}
             onChange={(e) =>
               setForm((current) => ({ ...current, address: e.target.value }))
             }
-            required
             minLength={5}
             maxLength={500}
-            aria-invalid={!form.address.trim()}
-            className={!form.address.trim() ? "field-missing" : undefined}
             placeholder="Home or registered business address"
           />
-          {!form.address.trim() ? (
-            <small className="field-error">Franchisee address is required.</small>
-          ) : null}
+          <small className="field-hint">Required before generating the franchise agreement.</small>
         </label>
         <IndustryField
           value={form.industry}
@@ -4681,6 +4934,7 @@ function InquiryPanel({
             className="button button-secondary"
             disabled={loading}
             onClick={async () => {
+              setAttempted(true);
               setLoading(true);
               try {
                 const currentLead = await ensureInquiryStarted();
@@ -5135,7 +5389,7 @@ function LocationAnalysisPanel({
   const [activeGroup, setActiveGroup] = useState(locationAnalysisGroups[0]);
   const [busy, setBusy] = useState(false);
   const canEdit = hasRole(session.user?.role, marketingWriteRoles);
-  const canReview = session.user?.role === "GeneralManager";
+  const canReview = hasRole(session.user?.role, ["GeneralManager"]);
 
   useEffect(() => {
     api.leads.location(lead.id).then((value) => {
@@ -5155,13 +5409,13 @@ function LocationAnalysisPanel({
     });
   }, [lead.id, lead.preferredLocation]);
 
-  const status = analysis?.status ?? "Draft";
+  const status = analysis?.status ?? "Pending";
   const questionCount = analysis?.questionCount || locationAnalysisQuestions.length;
   const answeredCount = Object.keys(answers).length;
   const completion = Math.round((answeredCount / questionCount) * 100);
   const answerList = Object.values(answers);
-  const isReadOnly = status === "Submitted" || status === "Approved" || !canEdit;
-  const isReturned = status === "Returned";
+  const isReturned = status === "Failed";
+  const isReadOnly = (Boolean(analysis?.submittedAt) && !isReturned) || status === "Passed" || !canEdit;
 
   const saveDraft = async () => {
     if (!preferredLocation.trim()) throw new Error("Add the preferred location in Inquiry before saving this assessment.");
@@ -5246,15 +5500,19 @@ function LocationAnalysisPanel({
         {!lead.preferredLocation && !analysis && <div className="location-analysis-callout"><AlertTriangle size={17} /> Add the proposed location in the Inquiry tab first, then return here to complete this assessment.</div>}
         <form onSubmit={saveAssessment}>
           <div className="location-analysis-meta">
-            <LocationPicker
-              label="Proposed franchise location"
-              value={preferredLocation}
-              onChange={setPreferredLocation}
-              required
-              invalid={!preferredLocation.trim()}
-              disabled={isReadOnly}
-              help="Use the map search to confirm the site, or enter it manually."
-            />
+            <label>
+              Proposed franchise location <span className="required-mark"> *</span>
+              <input
+                value={preferredLocation}
+                onChange={(event) => setPreferredLocation(event.target.value)}
+                required
+                maxLength={240}
+                disabled={isReadOnly}
+                placeholder="Street, barangay, city, province"
+                aria-invalid={!preferredLocation.trim()}
+                className={!preferredLocation.trim() ? "field-missing" : undefined}
+              />
+            </label>
             <label>Candidate<input value={analysis?.candidateName ?? lead.fullName} readOnly /></label>
             <label>Lease / ownership<select value={leaseOwnershipStatus} onChange={(e) => setLeaseOwnershipStatus(e.target.value)} disabled={isReadOnly}><option value="">Select status</option>{leaseOwnershipOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
           </div>
@@ -5277,15 +5535,15 @@ function LocationAnalysisPanel({
           <label className="location-analysis-notes">Overall assessment notes<textarea value={notes} onChange={(e) => setNotes(e.target.value)} maxLength={2000} disabled={isReadOnly} placeholder="Summarize important findings and risks." /></label>
           <p className="location-analysis-supporting"><FileText size={15} /> Add supporting photos or documents from the Documents tab.</p>
           {canEdit && !isReadOnly && <div className="location-analysis-actions"><button type="submit" className="button button-secondary" disabled={busy}>{busy ? "Saving…" : "Save draft"}</button><button type="button" className="button button-primary" disabled={busy || answeredCount !== questionCount || !leaseOwnershipStatus} onClick={submitForReview}><Send size={15} /> Submit for GM review</button></div>}
-          {canReview && status === "Submitted" && <div className="location-analysis-review"><span className="eyebrow">GENERAL MANAGER REVIEW</span><h3>Review the completed assessment</h3><textarea value={reviewNotes} onChange={(e) => setReviewNotes(e.target.value)} maxLength={2000} placeholder="Add approval notes or explain what needs revision." /><div className="location-analysis-actions"><button type="button" className="button button-secondary" disabled={busy} onClick={() => review("Returned")}>Return for revision</button><button type="button" className="button button-primary" disabled={busy} onClick={() => review("Approved")}><CheckCircle2 size={15} /> Approve analysis</button></div></div>}
-          {status === "Approved" && <div className="location-analysis-finished"><CheckCircle2 size={17} /><div><strong>Location analysis approved</strong><p>{analysis?.evaluatedByName ? `Approved by ${analysis.evaluatedByName}.` : "The assessment is complete and read-only."}</p></div></div>}
+          {canReview && Boolean(analysis?.submittedAt) && status === "Pending" && <div className="location-analysis-review"><span className="eyebrow">GENERAL MANAGER REVIEW</span><h3>Review the completed assessment</h3><textarea value={reviewNotes} onChange={(e) => setReviewNotes(e.target.value)} maxLength={2000} placeholder="Add approval notes or explain what needs revision." /><div className="location-analysis-actions"><button type="button" className="button button-secondary" disabled={busy} onClick={() => review("Returned")}>Return for revision</button><button type="button" className="button button-primary" disabled={busy} onClick={() => review("Approved")}><CheckCircle2 size={15} /> Approve analysis</button></div></div>}
+          {status === "Passed" && <div className="location-analysis-finished"><CheckCircle2 size={17} /><div><strong>Location analysis passed</strong><p>{analysis?.evaluatedByName ? `Passed by ${analysis.evaluatedByName}.` : "The assessment is complete and read-only."}</p></div></div>}
           {!canEdit && !canReview && <div className="read-only-note"><ShieldCheck size={16} /> Location analysis is view-only for your role.</div>}
         </form>
       </div>
       <aside className="location-analysis-sidebar">
         <div className="location-analysis-summary"><span className="eyebrow">ASSESSMENT SUMMARY</span><strong>{completion}% complete</strong><p>{answeredCount} of {questionCount} criteria answered</p><div className="location-response-counts">{responseCounts.map((item) => <div key={item.code}><span className={`response-dot ${item.code.toLowerCase()}`} />{locationAnalysisResponseLabels[item.code]}<strong>{item.count}</strong></div>)}<div><span className="response-dot unanswered" />Unanswered<strong>{questionCount - answeredCount}</strong></div></div></div>
         {attention.length > 0 && <div className="location-analysis-attention"><span className="eyebrow">ITEMS REQUIRING ATTENTION</span>{attention.slice(0, 4).map((answer) => <div key={answer.questionCode}><AlertTriangle size={14} /><span>{locationAnalysisQuestions.find((question) => question.code === answer.questionCode)?.prompt}</span></div>)}</div>}
-        <div className="location-analysis-next"><span className="eyebrow">NEXT</span><strong>{status === "Submitted" ? "Awaiting General Manager review" : status === "Approved" ? "Assessment complete" : nextGroup ? `Complete ${nextGroup}` : "Ready to submit"}</strong><p>{status === "Returned" ? "Update the requested items and submit again." : "Responses are saved as a draft until submitted."}</p></div>
+        <div className="location-analysis-next"><span className="eyebrow">NEXT</span><strong>{analysis?.submittedAt && status === "Pending" ? "Awaiting General Manager review" : status === "Passed" ? "Assessment passed" : nextGroup ? `Complete ${nextGroup}` : "Ready to submit"}</strong><p>{status === "Failed" ? "Update the requested items and submit again." : "Responses are saved as a draft until submitted."}</p></div>
       </aside>
     </section>
   );
@@ -5328,20 +5586,23 @@ function DocumentsPanel({
   const [replaceMode, setReplaceMode] = useState(false);
   const canUpload =
     fixedDocumentType === "PAYMENT_RECEIPT"
-      ? session.user?.role === "Finance"
-      : hasRole(session.user?.role, marketingWriteRoles) ||
-        session.user?.role === "Finance";
-  const uploadOptions =
-    session.user?.role === "Finance"
-      ? [["PAYMENT_RECEIPT", "Payment receipt or bank confirmation"]]
-      : session.user?.role === "MarketingAgent"
-      ? [["VALID_ID_SIGNATURES", "Valid ID + 3 specimen signatures"]]
-      : [
-          ["VALID_ID_SIGNATURES", "Valid ID + 3 specimen signatures"],
+      ? hasRole(session.user?.role, ["SalesAgent", "GeneralManager"])
+      : hasRole(session.user?.role, ["SalesAgent", "GeneralManager"]);
+  const uploadOptions: [string, string][] = [
+    ...(hasRole(session.user?.role, ["Finance"])
+      ? [["PAYMENT_RECEIPT", "Payment receipt or bank confirmation"] as [string, string]]
+      : []),
+    ...(hasRole(session.user?.role, ["SalesAgent"])
+      ? [["VALID_ID_SIGNATURES", "Valid ID + 3 specimen signatures"] as [string, string]]
+      : []),
+    ...(hasRole(session.user?.role, ["GeneralManager"])
+      ? ([
           ["FLOOR_PLAN", "Floor plan"],
           ["PERSPECTIVE", "Perspective"],
           ["SIGNED_CONTRACT", "Signed contract"],
-        ];
+        ] as [string, string][])
+      : []),
+  ];
   const typeFilteredDocuments = visibleTypes?.length
     ? documents.filter((item) => visibleTypes.includes(item.documentType))
     : documents;
@@ -5383,7 +5644,12 @@ function DocumentsPanel({
       });
       const response = await fetch(intent.uploadUrl, {
         method: "PUT",
-        headers: { "Content-Type": intent.requiredContentType },
+        headers: {
+          "Content-Type": intent.requiredContentType,
+          // The API signs S3 uploads with explicit AES-256 server-side encryption.
+          // S3 requires this header on the actual PUT as well as in the signature.
+          "x-amz-server-side-encryption": "AES256",
+        },
         body: file,
       });
       if (!response.ok) throw new Error("Private storage rejected the upload.");
@@ -5502,7 +5768,7 @@ function DocumentsPanel({
                   </div>
                 </div>
                 <div className="contract-uploaded-file-actions">
-                  <button type="button" className="text-link" onClick={() => download(item)}>View <ArrowUpRight size={13} /></button>
+                  <button type="button" className="text-link" onClick={() => download(item)}>{documentCard ? "View file" : "View"} <ArrowUpRight size={13} /></button>
                   {canUpload && !hideUpload && <button type="button" className="text-link muted-link" onClick={() => setReplaceMode(true)}>Replace</button>}
                 </div>
               </div>
@@ -5561,7 +5827,7 @@ function DocumentsPanel({
           }
           text={
             fixedDocumentType === "PAYMENT_RECEIPT"
-              ? "Finance can attach a receipt screenshot, bank confirmation, or PDF for this verification."
+              ? "The Sales Agent attaches a receipt screenshot, bank confirmation, or PDF before Finance verification."
               : fixedDocumentType === "FLOOR_PLAN"
                 ? "Upload the floor plan required before the contract is submitted for GM review."
               : fixedDocumentType === "PERSPECTIVE"
@@ -5755,9 +6021,9 @@ function ContractPanel({
   const [signingRequests, setSigningRequests] = useState<SigningRequest[]>([]);
   const [signingLinks, setSigningLinks] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
-  const canDraft = session.user?.role === "MarketingAdmin";
-  const canReview = session.user?.role === "GeneralManager";
-  const canSign = hasRole(session.user?.role, marketingWriteRoles);
+  const canDraft = hasRole(session.user?.role, ["SalesAgent", "GeneralManager"]);
+  const canReview = hasRole(session.user?.role, ["GeneralManager"]);
+  const canSign = hasRole(session.user?.role, ["SalesAgent", "GeneralManager"]);
   const canEditDraft =
     canDraft &&
     (!contract ||
@@ -5917,6 +6183,10 @@ function ContractPanel({
   const requiredContractDocuments = ["FLOOR_PLAN", "PERSPECTIVE"];
   const uploadedContractDocuments = requiredContractDocuments.filter((type) => contractDocuments.some((item) => item.documentType === type && item.status === "Uploaded"));
   const contractDocumentsComplete = uploadedContractDocuments.length === requiredContractDocuments.length;
+  const contractPrerequisites = [
+    !lead.address?.trim() ? "franchisee address" : null,
+    !lead.preferredLocation?.trim() ? "proposed franchise site" : null,
+  ].filter((item): item is string => Boolean(item));
   return (
     <section className="panel tab-panel">
       <PanelHeader
@@ -6027,43 +6297,50 @@ function ContractPanel({
           </>
         )}
         {!contract && canEditDraft && (
-          <div className="inline-form">
-            <label>
-              Contract template
-              <select
-                value={template}
-                onChange={(e) => setTemplate(e.target.value)}
+          <>
+            {contractPrerequisites.length > 0 && (
+              <div className="callout">
+                Add the {contractPrerequisites.join(" and ")} before generating the agreement. These details are optional while creating a new lead, but required for the contract.
+              </div>
+            )}
+            <div className="inline-form">
+              <label>
+                Contract template
+                <select
+                  value={template}
+                  onChange={(e) => setTemplate(e.target.value)}
+                >
+                  {contractTemplateOptions.map((option) => (
+                    <option value={option.code} key={option.code}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <button
+                className="button button-primary"
+                disabled={busy}
+                onClick={() =>
+                  run(
+                    () =>
+                      api.leads.generateContract(lead.id, {
+                        templateCode: template,
+                        version: "2026.07",
+                        expectedVersion: lead.version,
+                      }),
+                    contract ? "Contract regenerated." : "Contract generated.",
+                  )
+                }
               >
-                {contractTemplateOptions.map((option) => (
-                  <option value={option.code} key={option.code}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <button
-              className="button button-primary"
-              disabled={busy}
-              onClick={() =>
-                run(
-                  () =>
-                    api.leads.generateContract(lead.id, {
-                      templateCode: template,
-                      version: "2026.07",
-                      expectedVersion: lead.version,
-                    }),
-                  contract ? "Contract regenerated." : "Contract generated.",
-                )
-              }
-            >
-              Generate contract <ChevronRight size={15} />
-            </button>
-          </div>
+                Generate contract <ChevronRight size={15} />
+              </button>
+            </div>
+          </>
         )}
         {!canEditDraft && !contract && (
           <div className="read-only-note">
             <ShieldCheck size={16} /> Contract drafting is available to
-            Marketing Admin after payment is confirmed.
+            the agreement after payment is confirmed.
           </div>
         )}
         {contract && (
@@ -6074,9 +6351,9 @@ function ContractPanel({
                 <span className="contract-workflow-steps">1) Draft and submit · 2) GM reviews · 3) Secure e-signing <ChevronDown size={15} /></span>
               </summary>
               <div className="contract-workflow-details">
-                <span>1. Marketing Admin drafts the agreement and submits it for review.</span>
+                <span>1. Sales Agent drafts the agreement and submits it for review.</span>
                 <span>2. The General Manager completes the review checklist and approves or requests revisions.</span>
-                <span>3. Marketing creates secure e-signing links for both parties.</span>
+                <span>3. The Sales Agent creates secure e-signing links for both parties.</span>
               </div>
             </details>
             {contract.status === "RevisionRequested" && (
@@ -6197,7 +6474,7 @@ function ContractPanel({
                   <strong>Contract review complete</strong>
                   <span>
                     The General Manager approved this contract. The checklist is
-                    locked as the review record, and Marketing owns the signing
+                    locked as the review record, and the Sales Agent owns the signing
                     step from here.
                   </span>
                 </div>
@@ -6732,7 +7009,7 @@ function PreLaunchPanel({
               <div className="signed-contract-review-icon"><FileText size={22} /></div>
               <div>
                 <strong>Signed agreement ready for review</strong>
-                <span>Review the final agreement before an authorized Marketing user starts pre-launch.</span>
+                <span>Review the final agreement before the Sales Agent or General Manager starts pre-launch.</span>
               </div>
               <button className="button button-secondary" onClick={openSignedContract}>
                 <FileText size={14} /> Open signed agreement
@@ -6961,7 +7238,7 @@ function EndorsementPanel({
       .endorsement(lead.id)
       .then((value) => setEndorsement(value as Record<string, unknown>))
       .catch(() => setEndorsement(null));
-  }, [lead.id]);
+  }, [lead.id, lead.state]);
   const acknowledged =
     String(endorsement?.status ?? "").toLowerCase() === "acknowledged";
   const create = async () => {
@@ -6999,12 +7276,12 @@ function EndorsementPanel({
               <strong>Opportunity handed off successfully</strong>
               <span>
                 The Admin Team acknowledged the completed franchise handoff. No
-                further Marketing action is required.
+                further Sales Agent action is required.
               </span>
             </div>
           </div>
           <div className="snapshot-grid">
-            <Info label="Receiving team" value={String(endorsement.receivingTeam)} />
+            <Info label="Receiving team" value={roleLabel(String(endorsement.receivingTeam))} />
             <Info label="Status" value={statusLabel(String(endorsement.status))} />
             <Info label="Handoff created" value={formatDate(String(endorsement.createdAt))} />
             <Info
@@ -7019,7 +7296,7 @@ function EndorsementPanel({
           <div className="snapshot-grid">
             <Info
               label="Receiving team"
-              value={String(endorsement.receivingTeam)}
+              value={roleLabel(String(endorsement.receivingTeam))}
             />
             <Info label="Status" value={statusLabel(String(endorsement.status))} />
             <Info
@@ -7033,13 +7310,17 @@ function EndorsementPanel({
         <div className="form-grid">
           <Info label="Receiving team" value="Admin Team" />
           <label className="wide-label">
-            Handoff notes
+            Handoff notes <span className="required-mark">*</span>
             <textarea
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
               maxLength={4000}
+              aria-required="true"
+              aria-describedby="handoff-notes-hint"
+              placeholder="Summarize what the Admin Team needs to know for onboarding."
               required
             />
+            <small id="handoff-notes-hint" className="field-hint">Required before this opportunity can be handed off.</small>
           </label>
           <button
             className="button button-primary"
@@ -7107,7 +7388,7 @@ function AdminEndorsementPanel({
         <EmptyState
           icon={ClipboardCheck}
           title="No endorsement available"
-          text="Marketing must complete pre-launch and create the handoff record first."
+          text="The Sales Agent or General Manager must complete pre-launch and create the handoff record first."
         />
       </section>
     );
@@ -7118,11 +7399,11 @@ function AdminEndorsementPanel({
         subtitle={
           item.status === "Acknowledged"
             ? "This opportunity has been accepted by the Admin Team and is now complete."
-            : "Review the exact boundary between completed Marketing work and remaining Admin work."
+            : "Review the exact boundary between completed Sales Agent work and remaining Admin work."
         }
       />
       <div className="snapshot-grid">
-        <Info label="Receiving team" value={item.receivingTeam} />
+        <Info label="Receiving team" value={roleLabel(item.receivingTeam)} />
         <Info label="Status" value={statusLabel(item.status)} />
         <Info label="Created" value={formatDate(item.createdAt)} />
       </div>
@@ -7143,7 +7424,7 @@ function AdminEndorsementPanel({
               <small>
                 {boundary.adminActionRequired
                   ? "Admin action required"
-                  : "Completed by Marketing"}
+                  : "Completed by Sales Agent"}
               </small>
             </span>
           </div>
@@ -7739,8 +8020,7 @@ function QueuePage(props: {
     props.title === "Finance queue"
       ? (["Finance", "Leadership"] as Role[])
       : ([
-          "MarketingAgent",
-          "MarketingAdmin",
+          "SalesAgent",
           "GeneralManager",
           "Leadership",
         ] as Role[]);
@@ -7838,9 +8118,9 @@ function FinanceWorkbench() {
   const [notice, setNotice] = useState<Notice | null>(null);
 
   useEffect(() => {
-    api.users.list().then((items) => setOwners(
-      (items as { id: string; displayName: string; role: Role; isActive?: boolean }[])
-        .filter((item) => item.isActive !== false && ["MarketingAgent", "MarketingAdmin"].includes(item.role))
+    api.users.list("?page=1&pageSize=100").then((result) => setOwners(
+      result.items
+        .filter((item) => item.isActive !== false && (item.roles ?? [item.role]).some((role) => canonicalRole(role) === "SalesAgent"))
         .map((item) => ({ id: item.id, displayName: item.displayName })),
     )).catch(() => setOwners([]));
   }, []);
@@ -7994,7 +8274,7 @@ function FinancePaymentDrawer({ paymentId, onClose, onConfirmed }: { paymentId: 
       onConfirmed();
     } catch (e) { setError(errorMessage(e, "Unable to confirm this payment.")); } finally { setBusy(false); }
   };
-  const canAttachProof = detail?.payment.status === "Awaiting" && session.user?.role === "Finance";
+  const canAttachProof = detail?.payment.status === "Awaiting" && hasRole(session.user?.role, ["SalesAgent"]);
   return (
     <div
       className="finance-drawer-backdrop"
@@ -8147,11 +8427,11 @@ function formatMoney(value: number, currency = "PHP") {
 }
 
 function PreLaunchQueue() {
-  if (session.user?.role === "AdminTeam") return <EndorsementsQueue />;
+  if (hasRole(session.user?.role, ["AdminTeam"])) return <EndorsementsQueue />;
   if (
     !hasRole(session.user?.role, [
-      "MarketingAgent",
-      "MarketingAdmin",
+      "SalesAgent",
+      "GeneralManager",
       "Leadership",
     ])
   )
@@ -8216,46 +8496,142 @@ function PreLaunchQueueContent() {
 
 function EndorsementsQueue() {
   const realtimeRevision = useRealtimeRefresh();
-  const [items, setItems] = useState<
-    {
-      id: string;
-      leadId: string;
-      fullName: string;
-      status: string;
-      createdAt: string;
-    }[]
-  >([]);
+  type HandoffItem = {
+    code: string;
+    name: string;
+    completedByMarketing: boolean;
+    adminActionRequired: boolean;
+    notes?: string | null;
+  };
+  type Handoff = {
+    id: string;
+    leadId: string;
+    fullName: string;
+    receivingTeam: string;
+    status: string;
+    handoffNotes: string;
+    items: HandoffItem[];
+    createdAt: string;
+    acknowledgedAt?: string | null;
+  };
+  type HandoffView = "pending" | "acknowledged" | "all";
+  const [items, setItems] = useState<Handoff[]>([]);
+  const [leadNames, setLeadNames] = useState<Record<string, string>>({});
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [lead, setLead] = useState<Lead | null>(null);
+  const [preLaunch, setPreLaunch] = useState<{ items?: PreLaunchChecklistItem[]; status?: string } | null>(null);
+  const [documents, setDocuments] = useState<DocumentItem[]>([]);
+  const [documentsLoading, setDocumentsLoading] = useState(false);
+  const [documentsError, setDocumentsError] = useState("");
+  const [openingDocument, setOpeningDocument] = useState<string | null>(null);
+  const [showAllDocuments, setShowAllDocuments] = useState(false);
+  const [view, setView] = useState<HandoffView>("pending");
+  const [search, setSearch] = useState("");
+  const [sortOldestFirst, setSortOldestFirst] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
-  const canAcknowledge = session.user?.role === "AdminTeam";
-  const load = () =>
-    Promise.all([api.endorsements.list(), api.queues.admin()])
-      .then(([endorsements, queue]) => {
-        const names = new Map(
-          (queue as { leadId: string; fullName: string }[]).map((item) => [
-            item.leadId,
-            item.fullName,
-          ]),
+  const canAcknowledge = hasRole(session.user?.role, ["AdminTeam"]);
+  const load = async () => {
+    try {
+      const [endorsements, queue] = await Promise.all([
+        api.endorsements.list(),
+        api.queues.admin().catch(() => []),
+      ]);
+      const queueNames = new Map(
+        (queue as { leadId: string; fullName: string }[]).map((item) => [item.leadId, item.fullName]),
+      );
+      const mapped = (endorsements as Array<Record<string, unknown>>).map((item) => ({
+        id: String(item.id),
+        leadId: String(item.leadId),
+        fullName: queueNames.get(String(item.leadId)) ?? "Endorsed franchisee",
+        receivingTeam: String(item.receivingTeam ?? "Admin Team"),
+        status: String(item.status ?? "Pending"),
+        handoffNotes: String(item.handoffNotes ?? ""),
+        items: Array.isArray(item.items) ? item.items as HandoffItem[] : [],
+        createdAt: String(item.createdAt),
+        acknowledgedAt: item.acknowledgedAt ? String(item.acknowledgedAt) : null,
+      }));
+      setItems(mapped);
+      setLeadNames((current) => ({
+        ...current,
+        ...Object.fromEntries(queueNames.entries()),
+      }));
+      const missingLeadIds = [...new Set(mapped.map((item) => item.leadId).filter((id) => !queueNames.has(id)))];
+      if (missingLeadIds.length) {
+        const resolved = await Promise.allSettled(missingLeadIds.map((id) => api.leads.get(id)));
+        const resolvedNames = Object.fromEntries(
+          resolved.flatMap((result, index) => result.status === "fulfilled" ? [[missingLeadIds[index], result.value.fullName]] : []),
         );
-        setItems(
-          (
-            endorsements as {
-              id: string;
-              leadId: string;
-              status: string;
-              createdAt: string;
-            }[]
-          )
-            .filter((item) => item.status === "Pending")
-            .map((item) => ({
-              ...item,
-              fullName: names.get(item.leadId) ?? "Endorsed franchisee",
-            })),
-        );
-      })
-      .catch(() => undefined);
+        setLeadNames((current) => ({ ...current, ...resolvedNames }));
+      }
+    } catch {
+      setItems([]);
+    }
+  };
   useEffect(() => {
     void load();
   }, [realtimeRevision]);
+  const statusIs = (item: Handoff, status: HandoffView) => {
+    if (status === "all") return true;
+    return status === "pending" ? item.status.toLowerCase() === "pending" : item.status.toLowerCase() === "acknowledged";
+  };
+  const filteredItems = items
+    .filter((item) => statusIs(item, view))
+    .filter((item) => {
+      const query = search.trim().toLowerCase();
+      if (!query) return true;
+      return [item.fullName, leadNames[item.leadId], item.leadId, item.handoffNotes, item.receivingTeam]
+        .some((value) => value?.toLowerCase().includes(query));
+    })
+    .sort((a, b) => {
+      const aDate = Date.parse(a.acknowledgedAt ?? a.createdAt);
+      const bDate = Date.parse(b.acknowledgedAt ?? b.createdAt);
+      return sortOldestFirst ? aDate - bDate : bDate - aDate;
+    });
+  const pending = items.filter((item) => item.status.toLowerCase() === "pending");
+  const acknowledged = items.filter((item) => item.status.toLowerCase() === "acknowledged");
+  const acknowledgedThisMonth = acknowledged.filter((item) => {
+    if (!item.acknowledgedAt) return false;
+    const date = new Date(item.acknowledgedAt);
+    const now = new Date();
+    return date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth();
+  });
+  const averageHours = acknowledged.length
+    ? Math.round(acknowledged.reduce((total, item) => total + Math.max(0, Date.parse(item.acknowledgedAt ?? item.createdAt) - Date.parse(item.createdAt)) / 3600000, 0) / acknowledged.length)
+    : 0;
+  const oldestPending = [...pending].sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt))[0];
+  const selected = selectedId ? filteredItems.find((item) => item.id === selectedId) ?? null : null;
+  useEffect(() => {
+    if (selectedId && !filteredItems.some((item) => item.id === selectedId)) setSelectedId(null);
+  }, [selectedId, items, view, search]);
+  useEffect(() => {
+    if (!selected) {
+      setLead(null);
+      setPreLaunch(null);
+      setDocuments([]);
+      setDocumentsError("");
+      setDocumentsLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setShowAllDocuments(false);
+    setDocumentsLoading(true);
+    setDocumentsError("");
+    void Promise.all([
+      api.leads.get(selected.leadId).catch(() => null),
+      api.leads.preLaunch(selected.leadId).catch(() => null),
+      api.leads.documents(selected.leadId).catch((error) => {
+        if (!cancelled) setDocumentsError(errorMessage(error, "Documents could not be loaded."));
+        return [] as DocumentItem[];
+      }),
+    ]).then(([leadResult, checklist, documentResult]) => {
+      if (cancelled) return;
+      setLead(leadResult as Lead | null);
+      setPreLaunch(checklist as { items?: PreLaunchChecklistItem[]; status?: string } | null);
+      setDocuments(documentResult as DocumentItem[]);
+      setDocumentsLoading(false);
+    });
+    return () => { cancelled = true; };
+  }, [selected?.id]);
   const acknowledge = async (id: string) => {
     setBusy(id);
     try {
@@ -8265,53 +8641,77 @@ function EndorsementsQueue() {
       setBusy(null);
     }
   };
+  const openDocument = async (document: DocumentItem) => {
+    setOpeningDocument(document.id);
+    setDocumentsError("");
+    try {
+      const result = await api.leads.downloadUrl(document.leadId, document.id) as { downloadUrl?: string };
+      if (!result.downloadUrl) throw new Error("A download link is not available for this document.");
+      window.open(result.downloadUrl, "_blank", "noopener,noreferrer");
+    } catch (error) {
+      setDocumentsError(errorMessage(error, "Unable to open this document."));
+    } finally {
+      setOpeningDocument(null);
+    }
+  };
+  // ADMIN_ONBOARDING is an internal receiving-team follow-up, not a
+  // pre-launch requirement completed by Marketing. Keep it in the handoff
+  // boundary for the acknowledgement workflow, but do not count it here.
+  const assessmentItems = selected?.items.filter((item) => item.code.trim().toUpperCase() !== "ADMIN_ONBOARDING") ?? [];
+  const completedItems = assessmentItems.filter((item) => item.completedByMarketing);
+  const requiredItems = assessmentItems.filter((item) => item.completedByMarketing || item.adminActionRequired);
+  const completedCount = completedItems.length;
+  const totalCount = requiredItems.length || selected?.items.length || 0;
+  const reviewDocuments = documents.filter((document) => document.status.toLowerCase() === "uploaded");
+  const visibleDocuments = showAllDocuments ? reviewDocuments : reviewDocuments.slice(0, 3);
+  const statusTone = selected?.status.toLowerCase() === "acknowledged" ? "green" : "amber";
+  const formatAge = (createdAt: string) => {
+    const hours = Math.max(0, Math.floor((Date.now() - Date.parse(createdAt)) / 3600000));
+    if (hours < 24) return `${hours}h`;
+    const days = Math.floor(hours / 24);
+    return `${days}d`;
+  };
   return (
     <Page
       title="Handoff queue"
       subtitle="Receive completed franchise opportunities and confirm ownership."
     >
-      <section className="panel queue-panel">
-        <PanelHeader
-          title="Pending endorsements"
-          subtitle={
-            canAcknowledge
-              ? "Review the handoff context, then acknowledge receipt."
-              : "View-only endorsement activity for leadership."
-          }
-        />
-        {items.length ? (
-          <div className="queue-list">
-            {items.map((item) => (
-              <div className="queue-item" key={item.id}>
-                <div className="avatar">
-                  <ClipboardCheck size={15} />
-                </div>
-                <div>
-                  <strong>{item.fullName}</strong>
-                  <span>Endorsed · {formatDate(item.createdAt)}</span>
-                </div>
-                {canAcknowledge ? (
-                  <button
-                    className="button button-secondary"
-                    onClick={() => acknowledge(item.id)}
-                    disabled={busy === item.id}
-                  >
-                    {busy === item.id ? "Acknowledging…" : "Acknowledge"}
-                  </button>
-                ) : (
-                  <span className="muted">View only</span>
-                )}
-              </div>
-            ))}
+      <div className="handoff-metrics">
+        <div className="handoff-metric"><span className="handoff-metric-icon danger"><ClipboardCheck size={17} /></span><span><small>Pending handoffs</small><strong>{pending.length}</strong><em>Awaiting your action</em></span></div>
+        <div className="handoff-metric"><span className="handoff-metric-icon success"><CheckCircle2 size={17} /></span><span><small>Acknowledged this month</small><strong>{acknowledgedThisMonth.length}</strong><em>Handoffs received</em></span></div>
+        <div className="handoff-metric"><span className="handoff-metric-icon info"><Clock3 size={17} /></span><span><small>Average handoff time</small><strong>{averageHours ? `${averageHours}h` : "—"}</strong><em>From endorsement to acknowledgement</em></span></div>
+        <div className="handoff-metric"><span className="handoff-metric-icon warning"><AlertTriangle size={17} /></span><span><small>Oldest pending</small><strong>{oldestPending ? formatAge(oldestPending.createdAt) : "—"}</strong><em>{oldestPending ? (leadNames[oldestPending.leadId] ?? oldestPending.fullName) : "Nothing waiting"}</em></span></div>
+      </div>
+      <div className="handoff-workbench">
+        <section className="panel handoff-list-panel">
+          <div className="handoff-tabs" role="tablist" aria-label="Handoff status">
+            {([['pending', 'Pending handoffs', pending.length], ['acknowledged', 'Acknowledged', acknowledged.length], ['all', 'All handoffs', items.length]] as const).map(([key, label, count]) => <button key={key} role="tab" aria-selected={view === key} className={view === key ? "active" : ""} onClick={() => setView(key)}>{label}<b>{count}</b></button>)}
           </div>
-        ) : (
-          <EmptyState
-            icon={ClipboardCheck}
-            title="No pending endorsements"
-            text="Completed opportunities will appear here when they are handed off."
-          />
-        )}
-      </section>
+          <div className="handoff-toolbar"><label className="handoff-search"><Search size={15} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search franchise…" aria-label="Search handoffs" /></label><button className="button button-secondary handoff-sort" onClick={() => setSortOldestFirst((value) => !value)}><Clock3 size={14} />{sortOldestFirst ? "Oldest first" : "Newest first"}<ChevronDown size={14} /></button></div>
+          <p className="handoff-list-hint">{canAcknowledge ? "Review the handoff context, then acknowledge receipt." : "View-only handoff activity for your role."}</p>
+          {filteredItems.length ? <div className="handoff-table" role="list">{filteredItems.map((item) => {
+            const isSelected = item.id === selected?.id;
+            const name = leadNames[item.leadId] ?? item.fullName;
+            return <button className={`handoff-row ${isSelected ? "selected" : ""}`} key={item.id} onClick={() => setSelectedId(item.id)} role="listitem"><span className="avatar">{initials(name)}</span><span className="handoff-row-main"><strong>{name}</strong><small>{lead?.id === item.leadId && lead.preferredLocation ? lead.preferredLocation : "Marketing Operations"}</small></span><span className="handoff-row-meta"><strong>{formatDate(item.createdAt)}</strong><small>{item.status.toLowerCase() === "pending" ? `${formatAge(item.createdAt)} ago` : item.acknowledgedAt ? `Received ${formatDate(item.acknowledgedAt)}` : "Received"}</small></span><span className={`status-pill ${item.status.toLowerCase() === "pending" ? "amber" : "green"}`}>{item.status.toLowerCase() === "pending" ? "Ready" : "Acknowledged"}</span><span className="handoff-row-action">Review handoff</span><ChevronRight size={16} /></button>;
+          })}</div> : <EmptyState icon={ClipboardCheck} title={view === "pending" ? "No pending handoffs" : "No handoffs found"} text={search ? "Try a different search term." : "Completed opportunities will appear here when they are handed off."} />}
+        </section>
+      {selected && selectedId && <Modal title="Review handoff" subtitle={`${leadNames[selected.leadId] ?? selected.fullName} · ${selected.status.toLowerCase() === "pending" ? "Ready for handoff" : "Acknowledged"}`} onClose={() => setSelectedId(null)}>
+        <div className="handoff-modal-content">
+          {selected ? <>
+            <div className="handoff-detail-heading"><span className="avatar">{initials(leadNames[selected.leadId] ?? selected.fullName)}</span><div><strong>{leadNames[selected.leadId] ?? selected.fullName}</strong><small>{lead?.preferredLocation ?? "Franchise opportunity"}</small></div><span className={`status-pill ${statusTone}`}>{selected.status.toLowerCase() === "pending" ? "Ready for handoff" : "Acknowledged"}</span></div>
+            <div className="handoff-detail-section"><h3>Handoff from</h3><div className="handoff-owner"><span className="avatar small">M</span><span><strong>Marketing Operations</strong><small>{formatDateTime(selected.createdAt)}</small></span></div></div>
+            <div className="handoff-detail-section"><div className="handoff-section-title"><h3>Pre-launch summary</h3><span>{completedCount} of {totalCount || "—"} complete</span></div><div className="handoff-summary-list">{(assessmentItems.length ? assessmentItems : preLaunch?.items ?? []).slice(0, 6).map((item) => <div key={item.code} className={(("completedByMarketing" in item && item.completedByMarketing) || ("complete" in item && item.complete)) ? "complete" : "pending"}><CheckCircle2 size={14} /><span>{item.name}</span></div>)}</div></div>
+            <div className="handoff-detail-section"><div className="handoff-section-title"><h3>Documents for review</h3><span>{documentsLoading ? "Loading…" : `${reviewDocuments.length} uploaded`}</span></div>{documentsLoading ? <p className="handoff-document-empty">Loading handoff documents…</p> : reviewDocuments.length ? <><div className="handoff-document-list">{visibleDocuments.map((document) => <button type="button" className="handoff-document" key={document.id} onClick={() => void openDocument(document)} disabled={openingDocument === document.id}><span className="handoff-document-icon"><FileText size={15} /></span><span><strong>{documentTypeLabel(document.documentType)}</strong><small>{document.fileName} · {formatDate(document.createdAt)}</small></span><span className="handoff-document-open">{openingDocument === document.id ? "Opening…" : "Open"}<ArrowUpRight size={14} /></span></button>)}</div>{reviewDocuments.length > 3 && <button type="button" className="handoff-document-more" onClick={() => setShowAllDocuments((value) => !value)}>{showAllDocuments ? "Show fewer documents" : `Show all ${reviewDocuments.length} documents`}<ChevronDown size={14} className={showAllDocuments ? "up" : ""} /></button>}</> : <p className="handoff-document-empty">No uploaded documents are available for review yet.</p>}{documentsError && <p className="handoff-document-error">{documentsError}</p>}</div>
+            <div className="handoff-detail-section"><h3>Handoff notes</h3><p className="handoff-notes">{selected.handoffNotes || "No notes were added to this handoff."}</p></div>
+            {selected.status.toLowerCase() === "pending" && <div className="handoff-next"><strong>After acknowledgement</strong><ol><li>Admin Team accepts ownership</li><li>Franchisee moves to launch preparation</li><li>Handoff is recorded in the audit trail</li></ol></div>}
+            {(selected.status.toLowerCase() === "acknowledged" || (selected.status.toLowerCase() === "pending" && canAcknowledge)) && <div className="handoff-action-bar">
+              {selected.status.toLowerCase() === "pending" && canAcknowledge && <button className="button button-primary button-wide" onClick={() => void acknowledge(selected.id)} disabled={busy === selected.id}>{busy === selected.id ? "Acknowledging…" : "Acknowledge handoff"}<ChevronRight size={16} /></button>}
+              {selected.status.toLowerCase() === "acknowledged" && <p className="handoff-readonly"><CheckCircle2 size={15} /> Acknowledged {selected.acknowledgedAt ? formatDateTime(selected.acknowledgedAt) : "by the Admin Team"}.</p>}
+            </div>}
+          </> : <div className="handoff-detail-empty"><ClipboardCheck size={24} /><strong>Select a handoff to review</strong><span>Choose a row to see the pre-launch context and notes.</span></div>}
+        </div>
+      </Modal>}
+      </div>
     </Page>
   );
 }
@@ -8319,7 +8719,6 @@ function EndorsementsQueue() {
 function Reports() {
   if (
     !hasRole(session.user?.role, [
-      "MarketingAdmin",
       "GeneralManager",
       "Finance",
       "Leadership",
@@ -8337,7 +8736,7 @@ function ReportsContent() {
   type ReportingPeriod = "current" | "previous" | "year";
   const [period, setPeriod] = useState<ReportingPeriod>("current");
   const [agentId, setAgentId] = useState("");
-  const [agents, setAgents] = useState<{ id: string; displayName: string; role: string; isActive: boolean }[]>([]);
+  const [agents, setAgents] = useState<UserRecord[]>([]);
   const [report, setReport] = useState<Overview | null>(null);
   const [previousReport, setPreviousReport] = useState<Overview | null>(null);
   const [conversion, setConversion] = useState<Conversion | null>(null);
@@ -8373,7 +8772,7 @@ function ReportsContent() {
     return `${formatter.format(range.from)} – ${formatter.format(range.to)}`;
   };
   useEffect(() => {
-    api.users.list().then((value) => setAgents((value as { id: string; displayName: string; role: string; isActive: boolean }[]).filter((item) => item.isActive && ["MarketingAgent", "MarketingAdmin"].includes(item.role)))).catch(() => undefined);
+    api.users.list("?page=1&pageSize=100").then((value) => setAgents(value.items.filter((item) => item.isActive && (item.roles ?? [item.role]).some((role) => canonicalRole(role) === "SalesAgent")))).catch(() => undefined);
   }, []);
   useEffect(() => {
     setLoading(true);
@@ -8381,7 +8780,7 @@ function ReportsContent() {
     const currentQuery = queryFor(period);
     const previousQuery = queryFor("previous");
     const goalQuery = agentId ? `?agentId=${encodeURIComponent(agentId)}` : "";
-    if (session.user?.role === "Finance") {
+    if (hasRole(session.user?.role, ["Finance"])) {
       api.reports.downPayments(currentQuery).then((value) => setPayments(value as Payment)).catch((e) => setError(errorMessage(e, "Unable to load finance reports."))).finally(() => setLoading(false));
       return;
     }
@@ -8422,6 +8821,7 @@ function ReportsContent() {
     ["ContractReview", "Contract Review"],
     ["ContractSigned", "Contract Signed"],
     ["EndorsedToAdmin", "Endorsed"],
+    ["Acknowledged", "Acknowledged"],
   ].map(([key, label]) => ({ key, label, count: reached(key), percent: rate[key] ?? 0 }));
   const largestDrop = funnel.slice(1).reduce((largest, current, index) => {
     const prior = funnel[index];
@@ -8449,6 +8849,7 @@ function ReportsContent() {
     ["Contracting", "DownPaymentPending", "ContractReview"],
     ["Contracting", "ContractReview", "ContractSigned"],
     ["Franchise launch", "ContractSigned", "EndorsedToAdmin"],
+    ["Franchise launch", "EndorsedToAdmin", "Acknowledged"],
   ].map(([group, from, to]) => {
     const fromCount = reached(from);
     const toCount = reached(to);
@@ -8457,7 +8858,7 @@ function ReportsContent() {
   const topPerformer = leaderboard[0];
   if (loading) return <Page title="Reports" subtitle="Preparing an operational view of performance and next actions."><Loading /></Page>;
   if (error) return <Page title="Reports" subtitle={error}><button className="button button-secondary" onClick={() => window.location.reload()}>Try again</button></Page>;
-  if (session.user?.role === "Finance") return (
+  if (hasRole(session.user?.role, ["Finance"])) return (
     <Page title="Finance reports" subtitle="Collection performance and payment risk.">
       <ReportContext period={period} setPeriod={setPeriod} agentId={agentId} setAgentId={setAgentId} agents={agents} label={labelForPeriod(period)} />
       <PaymentPerformance payments={payments} />
@@ -8510,7 +8911,239 @@ function ReportsContent() {
 }
 
 function ReportContext({ period, setPeriod, agentId, setAgentId, agents, label }: { period: "current" | "previous" | "year"; setPeriod: (value: "current" | "previous" | "year") => void; agentId: string; setAgentId: (value: string) => void; agents: { id: string; displayName: string; role: string; isActive: boolean }[]; label: string }) {
-  return <section className="report-context"><div><span className="eyebrow">REPORTING PERIOD</span><strong>{label}</strong></div><label><span>Period</span><select value={period} onChange={(event) => setPeriod(event.target.value as "current" | "previous" | "year")}><option value="current">This month</option><option value="previous">Previous month</option><option value="year">Year to date</option></select></label><label><span>Branch</span><select disabled><option>All branches</option></select></label><label><span>Agent</span><select value={agentId} onChange={(event) => setAgentId(event.target.value)}><option value="">All agents</option>{agents.map((agent) => <option value={agent.id} key={agent.id}>{agent.displayName}</option>)}</select></label><label><span>Compare with</span><select defaultValue="previous"><option value="previous">Previous month</option></select></label></section>;
+  return <section className="report-context"><ReportPeriodPicker period={period} setPeriod={setPeriod} label={label} /><label><span>Branch</span><select disabled><option>All branches</option></select></label><label><span>Agent</span><select value={agentId} onChange={(event) => setAgentId(event.target.value)}><option value="">All agents</option>{agents.map((agent) => <option value={agent.id} key={agent.id}>{agent.displayName}</option>)}</select></label><label><span>Compare with</span><select defaultValue="previous"><option value="previous">Previous month</option></select></label></section>;
+}
+
+function ReportPeriodPicker({ period, setPeriod, label }: { period: "current" | "previous" | "year"; setPeriod: (value: "current" | "previous" | "year") => void; label: string }) {
+  const [open, setOpen] = useState(false);
+  const pickerRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const closeOnOutsideClick = (event: PointerEvent) => {
+      if (!pickerRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("pointerdown", closeOnOutsideClick);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnOutsideClick);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [open]);
+  const options: { value: "current" | "previous" | "year"; title: string; description: string; tone: string }[] = [
+    { value: "current", title: "This month", description: "Live month-to-date view", tone: "red" },
+    { value: "previous", title: "Previous month", description: "Completed prior month", tone: "amber" },
+    { value: "year", title: "Year to date", description: "January through this period", tone: "blue" },
+  ];
+  return <div className="report-date-picker" ref={pickerRef}><button type="button" className={`report-date-trigger ${open ? "open" : ""}`} onClick={() => setOpen((value) => !value)} aria-expanded={open} aria-haspopup="listbox"><span className="report-date-icon"><CalendarDays size={17} /></span><span className="report-date-trigger-copy"><small>REPORTING PERIOD</small><strong>{label}</strong></span><ChevronDown size={16} className="report-date-chevron" /></button>{open && <div className="report-date-menu" role="listbox" aria-label="Reporting period"><div className="report-date-menu-heading"><strong>Choose a reporting window</strong><span>Use a preset to refresh every report.</span></div><div className="report-date-options">{options.map((option) => <button type="button" role="option" aria-selected={period === option.value} className={`report-date-option ${period === option.value ? "active" : ""}`} key={option.value} onClick={() => { setPeriod(option.value); setOpen(false); }}><span className={`report-date-option-dot ${option.tone}`} /><span className="report-date-option-copy"><strong>{option.title}</strong><small>{option.description}</small></span>{period === option.value && <CheckCircle2 size={16} />}</button>)}</div></div>}</div>;
+}
+
+function parseLocalDateTime(value: string) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/.exec(value);
+  if (!match) return null;
+  const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]), Number(match[4]), Number(match[5]));
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function localDateTimeValue(date: Date) {
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function localDateKey(date: Date) {
+  return `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
+}
+
+function BrandedDateTimePicker({ value, onChange, selectedLabel = "Meeting time", emptyLabel = "Optional · choose a date and time", clearLabel = "Clear date and time", required = false }: { value: string; onChange: (value: string) => void; selectedLabel?: string; emptyLabel?: string; clearLabel?: string; required?: boolean }) {
+  const selectedDate = parseLocalDateTime(value);
+  const [open, setOpen] = useState(false);
+  const [popoverStyle, setPopoverStyle] = useState<{ left: number; width: number; top?: number; bottom?: number } | null>(null);
+  const [viewMonth, setViewMonth] = useState(() => {
+    const date = selectedDate ?? new Date();
+    return new Date(date.getFullYear(), date.getMonth(), 1);
+  });
+  const pickerRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (selectedDate) setViewMonth(new Date(selectedDate.getFullYear(), selectedDate.getMonth(), 1));
+  }, [value]);
+  useEffect(() => {
+    if (!open) return;
+    const closeOnOutsideClick = (event: PointerEvent) => {
+      if (!pickerRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("pointerdown", closeOnOutsideClick);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnOutsideClick);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [open]);
+  useEffect(() => {
+    if (!open) {
+      setPopoverStyle(null);
+      return;
+    }
+    const updatePopoverPosition = () => {
+      const bounds = pickerRef.current?.getBoundingClientRect();
+      if (!bounds) return;
+      const viewportPadding = 12;
+      const width = Math.min(320, Math.max(180, window.innerWidth - viewportPadding * 2));
+      const maxLeft = Math.max(viewportPadding, window.innerWidth - width - viewportPadding);
+      const left = Math.min(Math.max(viewportPadding, bounds.left), maxLeft);
+      const estimatedHeight = 315;
+      const opensAbove = bounds.bottom + estimatedHeight > window.innerHeight - viewportPadding && bounds.top > estimatedHeight + viewportPadding;
+      setPopoverStyle(opensAbove
+        ? { left, width, bottom: Math.max(viewportPadding, window.innerHeight - bounds.top + 8) }
+        : { left, width, top: Math.min(Math.max(viewportPadding, bounds.bottom + 8), Math.max(viewportPadding, window.innerHeight - estimatedHeight - viewportPadding)) });
+    };
+    updatePopoverPosition();
+    window.addEventListener("resize", updatePopoverPosition);
+    window.addEventListener("scroll", updatePopoverPosition, true);
+    return () => {
+      window.removeEventListener("resize", updatePopoverPosition);
+      window.removeEventListener("scroll", updatePopoverPosition, true);
+    };
+  }, [open]);
+  const baseDate = selectedDate ?? new Date();
+  const hour12 = ((baseDate.getHours() + 11) % 12) + 1;
+  const meridiem = baseDate.getHours() >= 12 ? "PM" : "AM";
+  const monthTitle = new Intl.DateTimeFormat("en-PH", { month: "long", year: "numeric" }).format(viewMonth);
+  const displayValue = selectedDate
+    ? new Intl.DateTimeFormat("en-PH", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" }).format(selectedDate)
+    : "Choose date and time";
+  const firstDay = new Date(viewMonth.getFullYear(), viewMonth.getMonth(), 1).getDay();
+  const daysInMonth = new Date(viewMonth.getFullYear(), viewMonth.getMonth() + 1, 0).getDate();
+  const calendarDays = Array.from({ length: 42 }, (_, index) => new Date(viewMonth.getFullYear(), viewMonth.getMonth(), index - firstDay + 1));
+  const todayKey = localDateKey(new Date());
+  const chooseDate = (date: Date) => {
+    const next = new Date(date.getFullYear(), date.getMonth(), date.getDate(), baseDate.getHours(), baseDate.getMinutes());
+    onChange(localDateTimeValue(next));
+    setViewMonth(new Date(date.getFullYear(), date.getMonth(), 1));
+  };
+  const chooseTime = (nextHour12: number, nextMinute: number, nextMeridiem: string) => {
+    const nextHour = (nextHour12 % 12) + (nextMeridiem === "PM" ? 12 : 0);
+    const next = new Date(baseDate.getFullYear(), baseDate.getMonth(), baseDate.getDate(), nextHour, nextMinute);
+    onChange(localDateTimeValue(next));
+  };
+  return <div className="branded-datetime" ref={pickerRef}><div className="branded-datetime-trigger-row"><button type="button" className={`branded-datetime-trigger ${open ? "open" : ""} ${selectedDate ? "has-value" : ""}`} onClick={() => setOpen((current) => !current)} aria-expanded={open} aria-haspopup="dialog" aria-required={required}><span className="branded-datetime-icon"><CalendarDays size={16} /></span><span className="branded-datetime-copy"><strong>{displayValue}</strong><small>{selectedDate ? selectedLabel : emptyLabel}</small></span><ChevronDown size={16} className="branded-datetime-chevron" /></button>{selectedDate && <button type="button" className="branded-datetime-clear" onClick={() => onChange("")} aria-label={clearLabel}><X size={14} /></button>}</div>{open && popoverStyle && <div className="branded-datetime-popover" style={popoverStyle} role="dialog" aria-label="Choose date and time"><div className="branded-datetime-month"><button type="button" onClick={() => setViewMonth((current) => new Date(current.getFullYear(), current.getMonth() - 1, 1))} aria-label="Previous month"><ChevronLeft size={16} /></button><strong>{monthTitle}</strong><button type="button" onClick={() => setViewMonth((current) => new Date(current.getFullYear(), current.getMonth() + 1, 1))} aria-label="Next month"><ChevronRight size={16} /></button></div><div className="branded-datetime-weekdays">{["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"].map((day) => <span key={day}>{day}</span>)}</div><div className="branded-datetime-calendar">{calendarDays.map((date) => { const inMonth = date.getMonth() === viewMonth.getMonth(); const selected = selectedDate && localDateKey(date) === localDateKey(selectedDate); const today = localDateKey(date) === todayKey; return <button type="button" key={date.toISOString()} className={`${inMonth ? "" : "muted"} ${selected ? "selected" : ""} ${today ? "today" : ""}`} onClick={() => chooseDate(date)} aria-pressed={Boolean(selected)}>{date.getDate()}</button>; })}</div><div className="branded-datetime-time"><span>Time</span><select value={hour12} onChange={(event) => chooseTime(Number(event.target.value), baseDate.getMinutes(), meridiem)} aria-label="Hour">{Array.from({ length: 12 }, (_, index) => index + 1).map((hour) => <option value={hour} key={hour}>{String(hour).padStart(2, "0")}</option>)}</select><span>:</span><select value={baseDate.getMinutes()} onChange={(event) => chooseTime(hour12, Number(event.target.value), meridiem)} aria-label="Minute">{Array.from({ length: 12 }, (_, index) => index * 5).map((minute) => <option value={minute} key={minute}>{String(minute).padStart(2, "0")}</option>)}</select><select value={meridiem} onChange={(event) => chooseTime(hour12, baseDate.getMinutes(), event.target.value)} aria-label="AM or PM"><option>AM</option><option>PM</option></select></div><div className="branded-datetime-actions"><button type="button" onClick={() => { const now = new Date(); chooseDate(now); }} >Today</button><button type="button" className="primary" onClick={() => setOpen(false)}>Done</button></div></div>}</div>;
+}
+
+type UserEditorValues = {
+  displayName: string;
+  email: string;
+  roles: Role[];
+  activeRole: Role;
+};
+
+const userRoleCards: { role: Role; icon: Icon }[] = [
+  { role: "SalesAgent", icon: UserRound },
+  { role: "GeneralManager", icon: UserRound },
+  { role: "Finance", icon: BarChart3 },
+  { role: "AdminTeam", icon: UsersRound },
+  { role: "Leadership", icon: Crown },
+];
+
+function UserManagementPage() {
+  if (!hasRole(session.user?.role, ["GeneralManager", "Leadership"]))
+    return <Navigate to="/" replace />;
+  return <UserManagementContent />;
+}
+
+function UserManagementContent() {
+  const [users, setUsers] = useState<UserRecord[]>([]);
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [searchDraft, setSearchDraft] = useState("");
+  const [search, setSearch] = useState("");
+  const [activeFilter, setActiveFilter] = useState("all");
+  const [loading, setLoading] = useState(true);
+  const [notice, setNotice] = useState<Notice | null>(null);
+  const [editor, setEditor] = useState<{ mode: "create" | "edit"; user?: UserRecord } | null>(null);
+  const canManageUsers = hasRole(session.user?.role, ["GeneralManager"]);
+  const pageSize = 10;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
+      if (search) params.set("search", search);
+      if (activeFilter !== "all") params.set("active", activeFilter);
+      const result = await api.users.list(`?${params.toString()}`);
+      setUsers(result.items);
+      setTotal(result.total);
+    } catch (e) {
+      setNotice({ message: errorMessage(e, "Unable to load users."), tone: "error" });
+    } finally {
+      setLoading(false);
+    }
+  };
+  useEffect(() => { void load(); }, [page, search, activeFilter]);
+
+  const submit = async (values: UserEditorValues) => {
+    if (values.roles.length === 0) throw new Error("Select at least one role.");
+    if (!values.roles.includes(values.activeRole)) throw new Error("Choose an active role from the assigned roles.");
+    if (editor?.mode === "create") {
+      await api.users.create({ email: values.email, displayName: values.displayName, roles: values.roles, role: values.activeRole });
+      setNotice({ message: "User created and activation email sent.", tone: "success" });
+    } else if (editor?.user) {
+      await api.users.update(editor.user.id, { displayName: values.displayName, roles: values.roles, role: values.activeRole });
+      setNotice({ message: "User access updated.", tone: "success" });
+    }
+    setEditor(null);
+    await load();
+  };
+
+  const deactivate = async (user: UserRecord) => {
+    if (!window.confirm(`Deactivate ${user.displayName}? They will no longer be able to sign in.`)) return;
+    try {
+      await api.users.deactivate(user.id);
+      setNotice({ message: `${user.displayName} was deactivated.`, tone: "success" });
+      await load();
+    } catch (e) {
+      setNotice({ message: errorMessage(e, "Unable to deactivate user."), tone: "error" });
+    }
+  };
+
+  return (
+    <Page title="User management" subtitle={canManageUsers ? "Create staff accounts, grant multiple roles, and choose the role each person is acting as." : "View workspace users, assigned roles, and account status."}>
+      {notice && <NoticeBar notice={notice} onClose={() => setNotice(null)} />}
+      <section className="panel user-management-panel">
+        <div className="user-management-heading">
+          <div><PanelHeader title="Workspace users" subtitle={`${total} account${total === 1 ? "" : "s"} in this organization.`} /></div>
+          {canManageUsers && <button className="button button-primary" onClick={() => setEditor({ mode: "create" })}><Plus size={16} /> Create user</button>}
+        </div>
+        <div className="user-management-toolbar">
+          <label className="toolbar-search"><Search size={16} /><input value={searchDraft} placeholder="Search name or email" onChange={(event) => setSearchDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { setPage(1); setSearch(searchDraft.trim()); } }} /></label>
+          <select value={activeFilter} onChange={(event) => { setPage(1); setActiveFilter(event.target.value); }}><option value="all">All accounts</option><option value="true">Active only</option><option value="false">Inactive only</option></select>
+          <button className="button button-secondary" onClick={() => { setPage(1); setSearch(searchDraft.trim()); }}>Search</button>
+        </div>
+        {loading ? <Loading /> : users.length === 0 ? <EmptyState icon={UsersRound} title="No users found" text="Try another search or create the first account." /> : (
+          <div className="user-table-wrap"><table className="user-table"><thead><tr><th>User</th><th>Assigned roles</th><th>Active role</th><th>Status</th><th>Created</th><th /></tr></thead><tbody>{users.map((user) => {
+            const roles = user.roles?.length ? user.roles : [user.role];
+            return <tr key={user.id}><td><div className="user-table-name"><div className="avatar">{initials(user.displayName)}</div><span><strong>{user.displayName}</strong><small>{user.email}</small></span></div></td><td><div className="role-pills">{roles.map((role) => <span key={role} className="role-pill">{roleLabel(role)}</span>)}</div></td><td><span className="active-role-label">{roleLabel(user.role)}</span></td><td><span className={`account-status ${user.isActive ? "active" : "inactive"}`}>{user.isActive ? "Active" : "Inactive"}</span></td><td className="muted">{formatDate(user.createdAt)}</td><td>{canManageUsers && <div className="table-actions"><button className="button button-quiet" onClick={() => setEditor({ mode: "edit", user })}>Edit access</button>{user.isActive && user.id !== session.user?.id && <button className="button button-quiet danger" onClick={() => void deactivate(user)}>Deactivate</button>}</div>}</td></tr>;
+          })}</tbody></table></div>
+        )}
+        <div className="pagination-bar"><span className="muted">Page {page} of {totalPages}</span><div><button className="button button-secondary" disabled={page <= 1} onClick={() => setPage((value) => value - 1)}><ChevronLeft size={15} /> Previous</button><button className="button button-secondary" disabled={page >= totalPages} onClick={() => setPage((value) => value + 1)}>Next <ChevronRight size={15} /></button></div></div>
+      </section>
+      {editor && <Modal title={editor.mode === "create" ? "Create user" : "Edit user access"} subtitle={editor.mode === "create" ? "Add a user and send a secure activation email." : "Assign one or more roles and choose the role used for the next session."} onClose={() => setEditor(null)}><UserEditorForm mode={editor.mode} user={editor.user} onSubmit={submit} onCancel={() => setEditor(null)} /></Modal>}
+    </Page>
+  );
+}
+
+function UserEditorForm({ mode, user, onSubmit, onCancel }: { mode: "create" | "edit"; user?: UserRecord; onSubmit: (values: UserEditorValues) => Promise<void>; onCancel: () => void }) {
+  const existingRoles: Role[] = user?.roles?.length ? user.roles.map(canonicalRole).filter((role): role is Role => Boolean(role)) : user ? [canonicalRole(user.role) ?? "SalesAgent"] : ["SalesAgent"];
+  const [values, setValues] = useState<UserEditorValues>({ displayName: user?.displayName ?? "", email: user?.email ?? "", roles: existingRoles, activeRole: canonicalRole(user?.role) ?? existingRoles[0] });
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const toggleRole = (role: Role) => setValues((current) => { const roles = current.roles.includes(role) ? current.roles.filter((item) => item !== role) : [...current.roles, role]; return { ...current, roles, activeRole: roles.includes(current.activeRole) ? current.activeRole : (roles[0] ?? role) }; });
+  const submit = async (event: FormEvent) => { event.preventDefault(); setBusy(true); setError(""); try { await onSubmit(values); } catch (e) { setError(errorMessage(e, "Unable to save user.")); } finally { setBusy(false); } };
+  return <form className="stack-form user-editor-form" onSubmit={submit}><div className="form-grid"><label><span>Full name</span><input required minLength={2} maxLength={160} value={values.displayName} onChange={(event) => setValues({ ...values, displayName: event.target.value })} placeholder="Enter full name" /></label><label><span>Email</span><input required type="email" maxLength={254} disabled={mode === "edit"} value={values.email} onChange={(event) => setValues({ ...values, email: event.target.value })} placeholder="Enter email address" /></label></div>{mode === "create" && <div className="user-editor-info"><CircleHelp size={16} /><span>A secure temporary password will be generated in the background and sent in the activation email. The user will change it on first sign-in.</span></div>}<fieldset className="role-editor"><legend>Assigned roles</legend><div className="role-card-grid">{userRoleCards.map(({ role, icon: RoleIcon }) => { const selected = values.roles.includes(role); return <label key={role} className={`role-card ${selected ? "selected" : ""}`}><input type="checkbox" checked={selected} onChange={() => toggleRole(role)} /><span className="role-card-icon"><RoleIcon size={17} /></span><span className="role-card-name">{roleLabel(role)}</span><span className="role-card-check">{selected ? <CheckCircle2 size={17} /> : <span />}</span></label>; })}</div></fieldset><label className="primary-role-field"><span>Primary role</span><small>Used as the default workspace after sign-in.</small><select value={values.activeRole} onChange={(event) => setValues({ ...values, activeRole: event.target.value as Role })}>{values.roles.map((role) => <option key={role} value={role}>{roleLabel(role)}</option>)}</select></label>{error && <div className="form-error" role="alert">{error}</div>}<div className="user-editor-actions"><button type="button" className="button button-secondary" onClick={onCancel}>Cancel</button><button className="button button-primary" disabled={busy || values.roles.length === 0}>{busy ? "Saving…" : mode === "create" ? "Create user & send invite" : "Save access"}</button></div></form>;
 }
 
 function PaymentPerformance({ payments }: { payments: { totalInvoiced: number; totalConfirmed: number; pendingCount: number; pendingAmount?: number } | null }) {
@@ -8521,7 +9154,7 @@ function PaymentPerformance({ payments }: { payments: { totalInvoiced: number; t
 }
 
 function SettingsPage() {
-  if (!hasRole(session.user?.role, ["MarketingAdmin", "Leadership"]))
+  if (!hasRole(session.user?.role, ["GeneralManager", "Leadership"]))
     return <Navigate to="/" replace />;
   return <SettingsContent />;
 }
@@ -8551,7 +9184,7 @@ function SettingsContent() {
         }),
       );
   }, []);
-  const canEditSettings = session.user?.role === "MarketingAdmin";
+  const canEditSettings = hasRole(session.user?.role, ["GeneralManager"]);
   const save = async (payload: unknown) => {
     try {
       const value = await api.settings.updatePricing(payload);
@@ -8696,6 +9329,374 @@ function SettingsContent() {
   );
 }
 
+function EventsPage() {
+  if (!hasRole(session.user?.role, ["GeneralManager"]))
+    return <Navigate to="/" replace />;
+
+  const realtimeRevision = useRealtimeRefresh();
+  const navigate = useNavigate();
+  const [events, setEvents] = useState<LeadCaptureEventRecord[]>([]);
+  const [recentLeads, setRecentLeads] = useState<Lead[]>([]);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [qr, setQr] = useState("");
+  const [showCreate, setShowCreate] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [busyId, setBusyId] = useState("");
+  const [copied, setCopied] = useState(false);
+  const [notice, setNotice] = useState<Notice | null>(null);
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [dateFilter, setDateFilter] = useState("all");
+  const [eventPage, setEventPage] = useState(1);
+  const [form, setForm] = useState({ name: "", description: "", startsAt: localDateTimeValue(new Date()), endsAt: localDateTimeValue(new Date(Date.now() + 8 * 60 * 60 * 1000)), activate: true });
+  const pageSize = 5;
+
+  const eventStatus = (item: LeadCaptureEventRecord) => {
+    const startsAt = new Date(item.startsAt).getTime();
+    const endsAt = new Date(item.endsAt).getTime();
+    if (item.isOpen) return "Open";
+    if (item.isActive && startsAt > Date.now()) return "Upcoming";
+    if (item.isActive && endsAt <= Date.now()) return "Closed";
+    return "Closed";
+  };
+  const eventStatusClass = (item: LeadCaptureEventRecord) => eventStatus(item).toLowerCase();
+  const load = async () => {
+    try {
+      const [nextEvents, leadPage] = await Promise.all([
+        api.leadCaptureEvents.list(),
+        api.leads.list("?limit=100&sort=createdAt").catch(() => ({ items: [] as Lead[] })),
+      ]);
+      setEvents(nextEvents);
+      setRecentLeads(leadPage.items);
+      setSelectedId((current) => current && nextEvents.some((item) => item.id === current) ? current : nextEvents[0]?.id ?? null);
+    } catch (error) {
+      setNotice({ message: errorMessage(error, "Unable to load prospect events."), tone: "error" });
+    }
+  };
+  useEffect(() => { void load(); }, [realtimeRevision]);
+
+  const selected = events.find((item) => item.id === selectedId) ?? null;
+  useEffect(() => {
+    setCopied(false);
+    if (!selected?.publicUrl) { setQr(""); return; }
+    QRCode.toDataURL(selected.publicUrl, { width: 320, margin: 2, color: { dark: "#18202a", light: "#ffffff" } }).then(setQr).catch(() => setQr(""));
+  }, [selected]);
+
+  const now = Date.now();
+  const filteredEvents = events.filter((item) => {
+    const query = search.trim().toLowerCase();
+    const matchesSearch = !query || `${item.name} ${item.description ?? ""}`.toLowerCase().includes(query);
+    const status = eventStatus(item).toLowerCase();
+    const matchesStatus = statusFilter === "all" || status === statusFilter;
+    const date = new Date(item.startsAt);
+    const current = new Date();
+    const matchesDate = dateFilter === "all" || (dateFilter === "month" && date.getFullYear() === current.getFullYear() && date.getMonth() === current.getMonth()) || (dateFilter === "next30" && date.getTime() >= now && date.getTime() <= now + 30 * 24 * 60 * 60 * 1000);
+    return matchesSearch && matchesStatus && matchesDate;
+  }).sort((a, b) => Date.parse(b.startsAt) - Date.parse(a.startsAt));
+  const totalPages = Math.max(1, Math.ceil(filteredEvents.length / pageSize));
+  const currentPage = Math.min(eventPage, totalPages);
+  const pageEvents = filteredEvents.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+  const activeCount = events.filter((item) => item.isOpen).length;
+  const upcoming = events.filter((item) => eventStatus(item) === "Upcoming").sort((a, b) => Date.parse(a.startsAt) - Date.parse(b.startsAt))[0];
+  const closedCount = events.filter((item) => eventStatus(item) === "Closed").length;
+  const totalProspects = events.reduce((sum, item) => sum + item.registrationCount, 0);
+  const selectedProspects = selected ? recentLeads.filter((lead) => lead.captureEventId === selected.id).slice(0, 3) : [];
+
+  const openCreate = () => {
+    setEditing(false);
+    setForm({ name: "", description: "", startsAt: localDateTimeValue(new Date()), endsAt: localDateTimeValue(new Date(Date.now() + 8 * 60 * 60 * 1000)), activate: true });
+    setShowCreate(true);
+  };
+  const openEdit = () => {
+    if (!selected) return;
+    setEditing(true);
+    setForm({ name: selected.name, description: selected.description ?? "", startsAt: localDateTimeValue(new Date(selected.startsAt)), endsAt: localDateTimeValue(new Date(selected.endsAt)), activate: selected.isActive });
+    setShowCreate(true);
+  };
+  const saveEvent = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!form.name.trim() || !form.startsAt || !form.endsAt) {
+      setNotice({
+        message: !form.startsAt || !form.endsAt ? "Choose both a start and end date and time." : "Enter an event name.",
+        tone: "error",
+      });
+      return;
+    }
+    setCreating(true); setNotice(null);
+    try {
+      const payload = { name: form.name.trim(), description: form.description.trim() || null, startsAt: new Date(form.startsAt).toISOString(), endsAt: new Date(form.endsAt).toISOString(), activate: form.activate };
+      const saved = editing && selected ? await api.leadCaptureEvents.update(selected.id, payload) : await api.leadCaptureEvents.create(payload);
+      setEvents((current) => editing ? current.map((item) => item.id === saved.id ? saved : item) : [saved, ...current]);
+      setSelectedId(saved.id);
+      setShowCreate(false);
+      setNotice({ message: editing ? "Event details updated." : "Event created. Download the QR and display it at the event.", tone: "success" });
+    } catch (error) {
+      setNotice({ message: errorMessage(error, editing ? "Unable to update the event." : "Unable to create the event."), tone: "error" });
+    } finally { setCreating(false); }
+  };
+  const updateEvent = async (action: "activate" | "deactivate" | "regenerateLink") => {
+    if (!selected) return;
+    setBusyId(selected.id); setNotice(null);
+    try {
+      const next = await api.leadCaptureEvents[action](selected.id);
+      setEvents((current) => current.map((item) => item.id === next.id ? next : item));
+      if (action === "regenerateLink") setNotice({ message: "A new QR link was generated. The previous link is no longer valid.", tone: "success" });
+    } catch (error) {
+      setNotice({ message: errorMessage(error, "Unable to update the event."), tone: "error" });
+    } finally { setBusyId(""); }
+  };
+  const copyLink = async () => {
+    if (!selected?.publicUrl) return;
+    try { await navigator.clipboard.writeText(selected.publicUrl); setCopied(true); window.setTimeout(() => setCopied(false), 1800); }
+    catch { setNotice({ message: "Copying is unavailable in this browser. Select the link and copy it manually.", tone: "error" }); }
+  };
+
+  return (
+    <Page
+      title="Prospect capture events"
+      subtitle="Create and manage prospect capture links and QR codes for campaigns, expos, and community events."
+      actions={<button className="button button-primary" onClick={openCreate}><Plus size={16} /> Create event</button>}
+    >
+      {notice && <NoticeBar notice={notice} onClose={() => setNotice(null)} />}
+      <div className="metric-grid event-metric-grid">
+        <Metric label="Active events" value={String(activeCount)} hint="Currently accepting prospects" icon={CalendarDays} tone="red" />
+        <Metric label="Upcoming" value={String(events.filter((item) => eventStatus(item) === "Upcoming").length)} hint={upcoming ? `Next: ${upcoming.name}` : "No upcoming events"} icon={Clock3} tone="amber" />
+        <Metric label="Closed" value={String(closedCount)} hint="Past or closed events" icon={Archive} tone="blue" />
+        <Metric label="Total prospects" value={totalProspects.toLocaleString()} hint="Captured across all events" icon={UsersRound} tone="green" />
+      </div>
+
+      <div className="event-workspace-grid">
+        <section className="panel event-catalog-panel">
+          <div className="event-toolbar">
+            <label className="event-search"><Search size={15} /><input value={search} onChange={(event) => { setSearch(event.target.value); setEventPage(1); }} placeholder="Search events…" aria-label="Search events" /></label>
+            <select value={statusFilter} onChange={(event) => { setStatusFilter(event.target.value); setEventPage(1); }} aria-label="Filter by status"><option value="all">Status: All</option><option value="open">Open</option><option value="upcoming">Upcoming</option><option value="closed">Closed</option></select>
+            <select value={dateFilter} onChange={(event) => { setDateFilter(event.target.value); setEventPage(1); }} aria-label="Filter by date"><option value="all">Date: All</option><option value="month">This month</option><option value="next30">Next 30 days</option></select>
+            <button type="button" className="event-filter-button" onClick={() => { setSearch(""); setStatusFilter("all"); setDateFilter("all"); setEventPage(1); }}><RefreshCw size={14} /> Reset</button>
+          </div>
+          <div className="event-table-head"><span>Event name</span><span>Schedule</span><span>Status</span><span>Prospects</span><span> </span></div>
+          <div className="event-table-body">
+            {pageEvents.length ? pageEvents.map((item) => (
+              <button type="button" key={item.id} className={`event-table-row ${selected?.id === item.id ? "selected" : ""}`} onClick={() => setSelectedId(item.id)}>
+                <span className="event-table-event"><span className="event-row-icon"><CalendarDays size={15} /></span><span><strong>{item.name}</strong><small>{item.description || "Franchise prospect event"}</small></span></span>
+                <span className="event-table-schedule"><strong>{formatDate(item.startsAt)}</strong><small>{new Intl.DateTimeFormat("en-PH", { hour: "numeric", minute: "2-digit" }).format(new Date(item.startsAt))} – {new Intl.DateTimeFormat("en-PH", { hour: "numeric", minute: "2-digit" }).format(new Date(item.endsAt))}</small></span>
+                <span><em className={`event-status-pill ${eventStatusClass(item)}`}>{eventStatus(item)}</em></span>
+                <span className="event-prospect-count">{item.registrationCount.toLocaleString()}<small>captured</small></span>
+                <ChevronRight size={15} className="event-row-chevron" />
+              </button>
+            )) : <EmptyState icon={CalendarDays} title="No events match" text="Create a prospect event or adjust the filters." />}
+          </div>
+          <div className="event-pagination"><span>Showing {filteredEvents.length ? (currentPage - 1) * pageSize + 1 : 0}–{Math.min(currentPage * pageSize, filteredEvents.length)} of {filteredEvents.length} events</span><div><button type="button" className="icon-button" disabled={currentPage <= 1} onClick={() => setEventPage((page) => Math.max(1, page - 1))} aria-label="Previous page"><ChevronLeft size={15} /></button>{Array.from({ length: totalPages }, (_, index) => index + 1).slice(0, 3).map((page) => <button type="button" key={page} className={`event-page-number ${currentPage === page ? "active" : ""}`} onClick={() => setEventPage(page)}>{page}</button>)}<button type="button" className="icon-button" disabled={currentPage >= totalPages} onClick={() => setEventPage((page) => Math.min(totalPages, page + 1))} aria-label="Next page"><ChevronRight size={15} /></button></div></div>
+        </section>
+
+        <section className="panel event-detail-panel">
+          {selected ? <>
+            <div className="event-detail-heading"><div className="event-detail-title"><span className="event-detail-icon"><CalendarDays size={18} /></span><div><h2>{selected.name}</h2><span className={`event-status-pill ${eventStatusClass(selected)}`}>{eventStatus(selected)}</span></div></div><button type="button" className="icon-button" onClick={() => setSelectedId(null)} aria-label="Close event details"><X size={17} /></button></div>
+            <div className="event-detail-meta"><span><CalendarDays size={14} /> {formatDate(selected.startsAt)}</span><span><Clock3 size={14} /> {new Intl.DateTimeFormat("en-PH", { hour: "numeric", minute: "2-digit" }).format(new Date(selected.startsAt))} – {new Intl.DateTimeFormat("en-PH", { hour: "numeric", minute: "2-digit" }).format(new Date(selected.endsAt))}</span></div>
+            <div className="event-detail-hero"><div className="event-total-prospects"><span>Total prospects</span><strong>{selected.registrationCount.toLocaleString()}</strong><small>captured for this event</small></div><div className="event-qr-frame">{qr ? <img src={qr} alt={`QR code for ${selected.name}`} /> : <div className="event-qr-empty"><QrCode size={32} /><span>Regenerate the link to show the QR</span></div>}</div></div>
+            <div className="event-link-label">Public prospect link</div><div className="event-link-row"><input readOnly value={selected.publicUrl || "Link needs regeneration"} aria-label="Public prospect link" /><button type="button" className="event-copy-button" disabled={!selected.publicUrl} onClick={copyLink}><Copy size={14} /> {copied ? "Copied" : "Copy link"}</button></div>
+            {!selected.publicUrl && <p className="event-link-help">This event was created before persistent links were enabled. Regenerate the link once to restore its QR code and save it for future reloads.</p>}
+            <div className="event-detail-actions"><a className="button button-secondary" href={qr || undefined} download={qr ? `${selected.name.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}-qr.png` : undefined} onClick={(event) => { if (!qr) event.preventDefault(); }}>{qr ? "Download QR" : "QR unavailable"}<ArrowUpRight size={14} /></a>{selected.publicUrl ? <a className="button button-secondary" href={selected.publicUrl} target="_blank" rel="noreferrer">Open prospect page <ArrowUpRight size={14} /></a> : <button type="button" className="button button-secondary" onClick={() => updateEvent("regenerateLink")}>Regenerate link <ArrowUpRight size={14} /></button>}</div>
+            <div className="event-quick-actions"><span>Quick actions</span><div><button type="button" className="button button-quiet" onClick={openEdit}><Pencil size={14} /> Edit event</button><button type="button" className="button button-quiet" onClick={() => navigate("/pipeline")}><UsersRound size={14} /> View prospects</button><button type="button" className="button button-quiet danger" disabled={busyId === selected.id} onClick={() => updateEvent(selected.isActive ? "deactivate" : "activate")}>{selected.isActive ? <Archive size={14} /> : <CheckCircle2 size={14} />}{selected.isActive ? "Close event" : "Open event"}</button></div></div>
+          </> : <EmptyState icon={QrCode} title="Select an event" text="Choose an event from the list to view its QR code, public link, and prospect activity." />}
+        </section>
+      </div>
+
+      <section className="panel event-recent-panel"><div className="event-recent-heading"><div><h3>Recent prospects</h3><p>Latest franchise opportunities captured through the selected event.</p></div>{selected && <button type="button" className="text-link" onClick={() => navigate("/pipeline")}>View all prospects <ArrowUpRight size={14} /></button>}</div>{selectedProspects.length ? <div className="event-recent-table"><div className="event-recent-row event-recent-head"><span>Prospect</span><span>Event</span><span>Captured</span><span>Contact</span><span>Status</span></div>{selectedProspects.map((lead) => <NavLink to={`/leads/${lead.id}`} className="event-recent-row" key={lead.id}><span className="event-recent-name"><span className="avatar avatar-small">{initials(lead.fullName)}</span><strong>{lead.fullName}</strong></span><span>{selected?.name}</span><span>{formatDateTime(lead.createdAt)}</span><span>{lead.email || lead.contactNumber || "Not provided"}</span><span><em className="event-status-pill prospect-status">New</em></span></NavLink>)}</div> : <div className="event-recent-empty"><UsersRound size={19} /><span><strong>{selected ? "No prospects captured yet" : "Select an event to see recent prospects"}</strong><small>New franchise prospects will appear here as people complete the public form.</small></span></div>}</section>
+
+      {showCreate && <Modal title={editing ? "Edit event" : "Create prospect event"} subtitle={editing ? "Update the schedule or event details without changing the public QR link." : "Set up a reusable QR link for your next franchise prospect campaign."} onClose={() => setShowCreate(false)}><form className="event-modal-form" onSubmit={saveEvent}><label>Event name<input required minLength={2} maxLength={160} value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder="Community Health Expo" /></label><label>Description <span className="field-optional">(optional)</span><textarea maxLength={1000} rows={3} value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} placeholder="Shown to prospects before they share their details." /></label><div className="form-grid"><div className="event-date-field"><span>Starts <span className="required-mark">*</span></span><BrandedDateTimePicker value={form.startsAt} required selectedLabel="Event time" emptyLabel="Required · choose start date and time" clearLabel="Clear event start" onChange={(value) => setForm({ ...form, startsAt: value })} /></div><div className="event-date-field"><span>Ends <span className="required-mark">*</span></span><BrandedDateTimePicker value={form.endsAt} required selectedLabel="Event time" emptyLabel="Required · choose end date and time" clearLabel="Clear event end" onChange={(value) => setForm({ ...form, endsAt: value })} /></div></div><label className="event-active-toggle"><input type="checkbox" checked={form.activate} onChange={(event) => setForm({ ...form, activate: event.target.checked })} /><span className="event-active-toggle-copy"><strong>Open prospect capture immediately</strong><small>Start accepting prospect entries as soon as this event is created.</small></span></label><div className="form-actions"><button type="button" className="button button-secondary" onClick={() => setShowCreate(false)}>Cancel</button><button className="button button-primary" disabled={creating}>{creating ? "Saving…" : editing ? "Save changes" : "Create event"}<ArrowUpRight size={15} /></button></div></form></Modal>}
+    </Page>
+  );
+}
+
+function LeadDetailsEditForm({
+  lead,
+  onSubmit,
+  onCancel,
+}: {
+  lead: Lead;
+  onSubmit: (payload: unknown) => Promise<void>;
+  onCancel: () => void;
+}) {
+  const [form, setForm] = useState({
+    fullName: lead.fullName,
+    age: lead.age?.toString() ?? "",
+    contactNumber: lead.contactNumber,
+    email: lead.email,
+    sourceOfIncome: lead.sourceOfIncome,
+    address: lead.address ?? "",
+    preferredLocation: lead.preferredLocation ?? "",
+    industry: lead.industry ?? "",
+    meetingDateTime: lead.meetingDateTime?.slice(0, 16) ?? "",
+    questionsConcerns: lead.questionsConcerns ?? "",
+  });
+  const [busy, setBusy] = useState(false);
+  const [attempted, setAttempted] = useState(false);
+  const emailValue = form.email.trim();
+  const contactNumberValue = form.contactNumber.trim();
+  const invalidEmail =
+    emailValue.length > 0 && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailValue);
+  const invalidContactNumber =
+    contactNumberValue.length > 0 && !/^[0-9+().\-\s]+$/.test(contactNumberValue);
+  const invalidAge =
+    form.age.trim().length > 0 &&
+    (!Number.isInteger(Number(form.age)) || Number(form.age) < 18 || Number(form.age) > 120);
+  const missingFields = [
+    form.fullName.trim().length < 2 ? "Full name" : null,
+    form.address.trim().length < 5 ? "Franchisee address" : null,
+  ].filter((item): item is string => Boolean(item));
+
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    setAttempted(true);
+    if (missingFields.length || invalidEmail || invalidContactNumber || invalidAge) return;
+    setBusy(true);
+    try {
+      await onSubmit({
+        fullName: form.fullName.trim(),
+        age: form.age.trim() ? Number(form.age) : null,
+        contactNumber: contactNumberValue || null,
+        email: emailValue || null,
+        sourceOfIncome: form.sourceOfIncome.trim() || null,
+        address: form.address.trim(),
+        preferredLocation: form.preferredLocation.trim() || null,
+        industry: form.industry.trim() || null,
+        meetingDateTime: form.meetingDateTime
+          ? new Date(form.meetingDateTime).toISOString()
+          : null,
+        questionsConcerns: form.questionsConcerns.trim() || null,
+      });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <form className="form-grid lead-details-edit-form" onSubmit={submit} noValidate>
+      {attempted && (missingFields.length || invalidEmail || invalidContactNumber || invalidAge) ? (
+        <div className="missing-fields-summary form-wide" role="alert">
+          <strong>Please complete</strong>
+          <span>
+            {[...missingFields,
+              ...(invalidEmail ? ["Email format"] : []),
+              ...(invalidContactNumber ? ["Contact number format"] : []),
+              ...(invalidAge ? ["Age"] : []),
+            ].join(", ")}
+          </span>
+        </div>
+      ) : null}
+      <label>
+        <span>Full name <span className="required-mark">*</span></span>
+        <input
+          required
+          minLength={2}
+          maxLength={160}
+          value={form.fullName}
+          onChange={(event) => setForm((current) => ({ ...current, fullName: event.target.value }))}
+          aria-invalid={attempted && form.fullName.trim().length < 2}
+          className={attempted && form.fullName.trim().length < 2 ? "field-missing" : undefined}
+        />
+      </label>
+      <label>
+        <span>Age <span className="field-optional">(optional)</span></span>
+        <input
+          type="number"
+          min={18}
+          max={120}
+          value={form.age}
+          onChange={(event) => setForm((current) => ({ ...current, age: event.target.value }))}
+          aria-invalid={attempted && invalidAge}
+          className={attempted && invalidAge ? "field-missing" : undefined}
+        />
+      </label>
+      <label>
+        <span>Contact number <span className="field-optional">(optional)</span></span>
+        <input
+          type="tel"
+          autoComplete="tel"
+          placeholder="+63 917 123 4567"
+          value={form.contactNumber}
+          onChange={(event) => setForm((current) => ({ ...current, contactNumber: event.target.value }))}
+          aria-invalid={attempted && invalidContactNumber}
+          className={attempted && invalidContactNumber ? "field-missing" : undefined}
+        />
+      </label>
+      <label>
+        <span>Email <span className="field-optional">(optional)</span></span>
+        <input
+          type="email"
+          autoComplete="email"
+          placeholder="name@example.com"
+          value={form.email}
+          onChange={(event) => setForm((current) => ({ ...current, email: event.target.value }))}
+          aria-invalid={attempted && invalidEmail}
+          className={attempted && invalidEmail ? "field-missing" : undefined}
+        />
+      </label>
+      <div className="form-wide">
+        <label>
+          <span>Franchisee address <span className="required-mark">*</span></span>
+          <input
+            required
+            minLength={5}
+            maxLength={500}
+            value={form.address}
+            onChange={(event) => setForm((current) => ({ ...current, address: event.target.value }))}
+            placeholder="Home or registered business address"
+            aria-invalid={attempted && form.address.trim().length < 5}
+            className={attempted && form.address.trim().length < 5 ? "field-missing" : undefined}
+          />
+          {attempted && form.address.trim().length < 5 ? (
+            <small className="field-error">Franchisee address is required.</small>
+          ) : null}
+        </label>
+      </div>
+      <div className="form-wide">
+        <label>
+          <span>Proposed franchise location <span className="field-optional">(optional)</span></span>
+          <input
+            maxLength={240}
+            value={form.preferredLocation}
+            onChange={(event) => setForm((current) => ({ ...current, preferredLocation: event.target.value }))}
+            placeholder="Street, barangay, city, province"
+          />
+        </label>
+      </div>
+      <SourceOfIncomeField
+        value={form.sourceOfIncome}
+        onChange={(sourceOfIncome) => setForm((current) => ({ ...current, sourceOfIncome }))}
+      />
+      <IndustryField
+        value={form.industry}
+        onChange={(industry) => setForm((current) => ({ ...current, industry }))}
+      />
+      <label>
+        <span>Meeting date and time <span className="field-optional">(optional)</span></span>
+        <BrandedDateTimePicker
+          value={form.meetingDateTime}
+          onChange={(meetingDateTime) => setForm((current) => ({ ...current, meetingDateTime }))}
+        />
+      </label>
+      <label className="form-wide">
+        <span>Questions or concerns <span className="field-optional">(optional)</span></span>
+        <textarea
+          rows={3}
+          maxLength={4000}
+          value={form.questionsConcerns}
+          onChange={(event) => setForm((current) => ({ ...current, questionsConcerns: event.target.value }))}
+          placeholder="Capture any context the team should know."
+        />
+      </label>
+      <div className="form-actions form-wide">
+        <button type="button" className="button button-secondary" onClick={onCancel} disabled={busy}>Cancel</button>
+        <button className="button button-primary" disabled={busy}>
+          {busy ? "Saving…" : "Save lead details"}
+        </button>
+      </div>
+    </form>
+  );
+}
+
 function LeadForm({
   onSubmit,
   submitLabel,
@@ -8717,7 +9718,7 @@ function LeadForm({
   const [busy, setBusy] = useState(false);
   const [attempted, setAttempted] = useState(false);
   const [agents, setAgents] = useState<
-    { id: string; displayName: string; role: string; isActive: boolean }[]
+    UserRecord[]
   >([]);
   const emailValue = form.email.trim();
   const contactNumberValue = form.contactNumber.trim();
@@ -8729,25 +9730,22 @@ function LeadForm({
     !/^[0-9+().\-\s]+$/.test(contactNumberValue);
   const missingFields = [
     !form.fullName.trim() ? "Full name" : null,
-    !form.address.trim() ? "Franchisee address" : null,
-    !form.preferredLocation.trim() ? "Proposed location" : null,
-    hasRole(session.user?.role, ["MarketingAdmin", "GeneralManager"]) &&
+    form.address.trim().length < 5 ? "Franchisee address" : null,
+    hasRole(session.user?.role, ["GeneralManager"]) &&
     !form.assignedAgentId
       ? "Responsible owner"
       : null,
   ].filter(Boolean) as string[];
   useEffect(() => {
-    if (hasRole(session.user?.role, ["MarketingAdmin", "GeneralManager"]))
+    if (hasRole(session.user?.role, ["GeneralManager"]))
       api.users
-        .list()
-        .then((items) =>
+        .list("?page=1&pageSize=100")
+        .then((result) =>
           setAgents(
-            (items as typeof agents).filter(
+            result.items.filter(
               (item) =>
                 item.isActive &&
-                (session.user?.role === "MarketingAdmin"
-                  ? ["MarketingAgent", "MarketingAdmin"].includes(item.role)
-                  : item.role === "MarketingAgent"),
+                (item.roles ?? [item.role]).some((role) => canonicalRole(role) === "SalesAgent"),
             ),
           ),
         )
@@ -8859,25 +9857,27 @@ function LeadForm({
           value={form.address}
           onChange={(e) => setForm({ ...form, address: e.target.value })}
           placeholder="Home or registered business address"
-          aria-invalid={attempted && !form.address.trim()}
-          className={attempted && !form.address.trim() ? "field-missing" : undefined}
+          aria-invalid={attempted && form.address.trim().length < 5}
+          className={attempted && form.address.trim().length < 5 ? "field-missing" : undefined}
         />
-        {attempted && !form.address.trim() ? (
+        {attempted && form.address.trim().length < 5 ? (
           <small className="field-error">Franchisee address is required.</small>
-        ) : null}
+        ) : (
+          <small className="field-hint">Used on the franchise agreement and official records.</small>
+        )}
       </label>
       <div className="form-wide">
-        <LocationPicker
-          label="Proposed franchise location"
-          value={form.preferredLocation}
-          onChange={(preferredLocation) => setForm({ ...form, preferredLocation })}
-          required
-          invalid={attempted && !form.preferredLocation.trim()}
-          help="Search for the site in Google Maps, or enter the full address if Maps is not configured."
-        />
-        {attempted && !form.preferredLocation.trim() ? (
-          <small className="field-error">Proposed franchise location is required.</small>
-        ) : null}
+        <label>
+          <span>
+            Proposed franchise location <span className="field-optional">(optional)</span>
+          </span>
+          <input
+            value={form.preferredLocation}
+            onChange={(event) => setForm({ ...form, preferredLocation: event.target.value })}
+            maxLength={240}
+            placeholder="Street, barangay, city, province"
+          />
+        </label>
       </div>
       <SourceOfIncomeField
         value={form.sourceOfIncome}
@@ -8909,7 +9909,7 @@ function LeadForm({
           <option value="Combo">ABC + Pharmacy</option>
         </select>
       </label>
-      {hasRole(session.user?.role, ["MarketingAdmin", "GeneralManager"]) && (
+      {hasRole(session.user?.role, ["GeneralManager"]) && (
         <label>
           <span>
             Responsible owner <span className="required-mark">*</span>
@@ -9307,18 +10307,32 @@ function Metric({
   );
 }
 function LeadRow({ lead }: { lead: Lead }) {
+  const nextStep = nextStepForLead(lead, Boolean(lead.downPaymentSubmittedForFinance));
+  const nextOwner = nextActionOwnerForLead(lead, Boolean(lead.downPaymentSubmittedForFinance));
+  const overdue = isOverdueLead(lead);
   return (
-    <NavLink to={`/leads/${lead.id}`} className="lead-row">
-      <div className="avatar">{initials(lead.fullName)}</div>
-      <div className="lead-row-main">
-        <strong>{lead.fullName}</strong>
-        <span>
-          {lead.preferredLocation ?? "Location not provided"} · Updated{" "}
-          {formatDate(lead.updatedAt)}
-        </span>
+    <NavLink
+      to={`/leads/${lead.id}`}
+      className={`lead-row dashboard-focus-row ${overdue ? "is-overdue" : ""}`}
+    >
+      <div className={`avatar ${overdue ? "dashboard-focus-avatar-overdue" : ""}`}>
+        {initials(lead.fullName)}
       </div>
-      <StatusPill state={lead.state} />
-      <ChevronRight size={17} />
+      <div className="lead-row-main">
+        <div className="dashboard-focus-title">
+          <strong>{lead.fullName}</strong>
+          <StatusPill state={lead.state} />
+        </div>
+        <span className="dashboard-focus-location">
+          {lead.preferredLocation ?? "Location not provided"} · Updated {formatDate(lead.updatedAt)}
+        </span>
+        <small className="dashboard-focus-next">
+          <span>Next: {nextStep.label}</span> · {nextOwner}
+        </small>
+      </div>
+      <span className="dashboard-focus-open">
+        Open <ChevronRight size={16} />
+      </span>
     </NavLink>
   );
 }
@@ -9529,17 +10543,16 @@ function initials(name: string) {
 function firstName(name: string) {
   return name.split(" ")[0];
 }
-function roleLabel(role: Role) {
-  return (
-    {
-      MarketingAgent: "Marketing agent",
-      MarketingAdmin: "Marketing admin",
-      GeneralManager: "General manager",
-      Finance: "Finance",
-      AdminTeam: "Admin team",
-      Leadership: "Leadership",
-    } satisfies Record<Role, string>
-  )[role];
+function roleLabel(role: Role | string) {
+  return ({
+    SalesAgent: "Sales Agent",
+    MarketingAgent: "Sales Agent",
+    MarketingAdmin: "General Manager",
+    GeneralManager: "General Manager",
+    Finance: "Finance",
+    AdminTeam: "Admin Team",
+    Leadership: "Leadership",
+  } as Record<string, string>)[role] ?? friendlyFieldLabel(role);
 }
 function labelForState(state: LeadState) {
   return states.find((item) => item.value === state)?.label ?? state;

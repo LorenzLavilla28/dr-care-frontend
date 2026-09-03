@@ -3,6 +3,7 @@ const API_URL =
   "http://localhost:8080";
 
 export type Role =
+  | "SalesAgent"
   | "MarketingAgent"
   | "MarketingAdmin"
   | "GeneralManager"
@@ -22,7 +23,8 @@ export type LeadState =
   | "ContractReview"
   | "ContractSigned"
   | "PreLaunch"
-  | "EndorsedToAdmin";
+  | "EndorsedToAdmin"
+  | "Acknowledged";
 export type ProductLine = "Abc" | "Pharmacy" | "Combo";
 
 export interface UserProfile {
@@ -31,6 +33,17 @@ export interface UserProfile {
   email: string;
   displayName: string;
   role: Role;
+  roles?: Role[];
+  mustChangePassword?: boolean;
+}
+export interface UserRecord {
+  id: string;
+  email: string;
+  displayName: string;
+  role: Role;
+  roles?: Role[];
+  isActive: boolean;
+  createdAt: string;
 }
 export interface LoginResponse {
   accessToken: string;
@@ -66,6 +79,35 @@ export interface Lead {
   version: number;
   locationAnalysisPending: boolean;
   downPaymentSubmittedForFinance?: boolean;
+  captureEventId?: string | null;
+}
+export interface LeadPage {
+  items: Lead[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+export interface PublicEventLanding {
+  name: string;
+  description?: string | null;
+  startsAt: string;
+  endsAt: string;
+  isOpen: boolean;
+}
+export interface LeadCaptureEventRecord {
+  id: string;
+  name: string;
+  description?: string | null;
+  startsAt: string;
+  endsAt: string;
+  isActive: boolean;
+  isOpen: boolean;
+  registrationCount: number;
+  publicUrl: string;
+}
+export interface PublicEventRegistrationResponse {
+  message: string;
+  eventName: string;
 }
 export type LocationAnalysisResponseCode =
   | "YES_COMPLETELY"
@@ -88,7 +130,7 @@ export interface LocationAnalysisResponse {
   candidateName: string;
   preferredLocation: string;
   leaseOwnershipStatus: string;
-  status: "Draft" | "Submitted" | "Approved" | "Returned" | string;
+  status: "Pending" | "Passed" | "Failed" | string;
   notes?: string | null;
   reviewNotes?: string | null;
   updatedAt: string;
@@ -247,6 +289,10 @@ let accessToken: string | null = null;
 let currentUser: UserProfile | null = null;
 let refreshPromise: Promise<LoginResponse | null> | null = null;
 
+function normalizeUser(user: UserProfile): UserProfile {
+  return { ...user, roles: user.roles?.length ? user.roles : [user.role] };
+}
+
 export const session = {
   get token() {
     return accessToken;
@@ -256,7 +302,7 @@ export const session = {
   },
   set(response: LoginResponse) {
     accessToken = response.accessToken;
-    currentUser = response.user;
+    currentUser = normalizeUser(response.user);
   },
   clear() {
     accessToken = null;
@@ -372,17 +418,28 @@ export const api = {
         "/api/v1/auth/reset-password",
         json(payload),
       ),
+    changePassword: (payload: { currentPassword: string; newPassword: string }) =>
+      rawRequest<LoginResponse>(
+        "/api/v1/auth/change-password",
+        json(payload),
+      ),
     me: () => rawRequest<UserProfile>("/api/v1/auth/me"),
+    switchRole: (role: Role) =>
+      rawRequest<LoginResponse>("/api/v1/auth/switch-role", json({ role })),
   },
   users: {
-    list: () => rawRequest<unknown[]>("/api/v1/users"),
+    list: (query = "") =>
+      rawRequest<PagedResponse<UserRecord>>(`/api/v1/users${query}`),
     create: (payload: unknown) =>
-      rawRequest<unknown>("/api/v1/users", json(payload)),
-    get: (id: string) => rawRequest<unknown>(`/api/v1/users/${id}`),
+      rawRequest<UserRecord>("/api/v1/users", json(payload)),
+    get: (id: string) => rawRequest<UserRecord>(`/api/v1/users/${id}`),
     update: (id: string, payload: unknown) =>
-      rawRequest<unknown>(`/api/v1/users/${id}`, patch(payload)),
+      rawRequest<UserRecord>(`/api/v1/users/${id}`, patch(payload)),
     deactivate: (id: string) =>
-      rawRequest<unknown>(`/api/v1/users/${id}/deactivate`, json({})),
+      rawRequest<{ userId: string; isActive: boolean; changedAt: string }>(
+        `/api/v1/users/${id}/deactivate`,
+        json({}),
+      ),
   },
   reference: {
     pipelineStates: () =>
@@ -398,16 +455,36 @@ export const api = {
       ),
   },
   leads: {
-    list: (query = "") =>
-      rawRequest<{
-        items: Lead[];
-        total: number;
-        page: number;
-        pageSize: number;
-      }>(`/api/v1/leads${query}`),
+    list: (query = "") => rawRequest<LeadPage>(`/api/v1/leads${query}`),
+    listAll: async (query = "") => {
+      const params = new URLSearchParams(query.replace(/^\?/, ""));
+      params.delete("cursor");
+
+      const requestedLimit = Number(params.get("limit"));
+      const pageSize = Number.isFinite(requestedLimit) && requestedLimit > 0
+        ? Math.max(1, Math.min(100, Math.floor(requestedLimit)))
+        : 100;
+      params.set("limit", String(pageSize));
+
+      const items: Lead[] = [];
+      let page = 1;
+      let total = 0;
+      do {
+        params.set("page", String(page));
+        const result = await rawRequest<LeadPage>(`/api/v1/leads?${params.toString()}`);
+        items.push(...result.items);
+        total = result.total;
+        if (!result.items.length || items.length >= total) break;
+        page += 1;
+      } while (page <= Math.max(1, Math.ceil(total / pageSize)));
+
+      return { items: items.slice(0, total), total, page: 1, pageSize } satisfies LeadPage;
+    },
     get: (id: string) => rawRequest<Lead>(`/api/v1/leads/${id}`),
     create: (payload: unknown) =>
       rawRequest<Lead>("/api/v1/leads", json(payload)),
+    updateDetails: (id: string, payload: unknown) =>
+      rawRequest<Lead>(`/api/v1/leads/${id}`, patch(payload)),
     startInquiry: (id: string) =>
       rawRequest<Lead>(`/api/v1/leads/${id}/inquiry/start`, json({})),
     getInquiry: (id: string) => rawRequest<Lead>(`/api/v1/leads/${id}/inquiry`),
@@ -697,6 +774,23 @@ export const api = {
         `/api/v1/public/contract-signing/${encodeURIComponent(token)}/decline`,
         json(payload),
       ),
+  },
+  publicEvents: {
+    get: (token: string) =>
+      rawRequest<PublicEventLanding>(`/api/v1/public/events/${encodeURIComponent(token)}`),
+    register: (token: string, payload: unknown) =>
+      rawRequest<PublicEventRegistrationResponse>(
+        `/api/v1/public/events/${encodeURIComponent(token)}/registrations`,
+        json(payload),
+      ),
+  },
+  leadCaptureEvents: {
+    list: () => rawRequest<LeadCaptureEventRecord[]>('/api/v1/lead-capture-events'),
+    create: (payload: unknown) => rawRequest<LeadCaptureEventRecord>('/api/v1/lead-capture-events', json(payload)),
+    update: (id: string, payload: unknown) => rawRequest<LeadCaptureEventRecord>(`/api/v1/lead-capture-events/${id}`, { method: "PUT", body: JSON.stringify(payload) }),
+    activate: (id: string) => rawRequest<LeadCaptureEventRecord>(`/api/v1/lead-capture-events/${id}/activate`, json({})),
+    deactivate: (id: string) => rawRequest<LeadCaptureEventRecord>(`/api/v1/lead-capture-events/${id}/deactivate`, json({})),
+    regenerateLink: (id: string) => rawRequest<LeadCaptureEventRecord>(`/api/v1/lead-capture-events/${id}/regenerate-link`, json({})),
   },
 };
 
