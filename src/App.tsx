@@ -65,6 +65,10 @@ import {
   type FinancePaymentDetail,
   type FinancePaymentItem,
   type FinanceWorkbenchResponse,
+  type BalancePayment,
+  type PaymentAccount,
+  type PaymentManagementItem,
+  type PaymentManagementResponse,
   type Lead,
   type LeadState,
   type LocationAnalysisAnswer,
@@ -285,21 +289,6 @@ const industryOptions = [
   "Government / public service",
   "Others",
 ] as const;
-
-const discussionTimeOptions = [
-  "Morning (8 AM–12 PM)",
-  "Afternoon (12 PM–5 PM)",
-  "Evening (5 PM–8 PM)",
-  "Weekdays",
-  "Weekends",
-  "To be scheduled",
-] as const;
-
-function normalizedDiscussionTime(value?: string | null) {
-  if (discussionTimeOptions.includes(value as (typeof discussionTimeOptions)[number]))
-    return value ?? "";
-  return value === "Yes" ? "To be scheduled" : "";
-}
 
 function SourceOfIncomeField({
   value,
@@ -736,6 +725,12 @@ const nav: { label: string; to: string; icon: Icon; roles?: Role[] }[] = [
     to: "/finance",
     icon: WalletCards,
     roles: ["Finance", "Leadership"],
+  },
+  {
+    label: "Payments & balances",
+    to: "/payments",
+    icon: WalletCards,
+    roles: ["SalesAgent", "GeneralManager", "Finance", "Leadership"],
   },
   {
     label: "Documents & contracts",
@@ -1219,7 +1214,7 @@ function ContractSignPage({ token }: { token: string }) {
     const p = point(event);
     const context = event.currentTarget.getContext("2d");
     if (!context) return;
-    context.lineWidth = 3;
+    context.lineWidth = 12;
     context.lineCap = "round";
     context.strokeStyle = "#111827";
     context.lineTo(p.x, p.y);
@@ -1548,6 +1543,7 @@ function Shell({
                 <FinanceWorkbench />
               }
             />
+            <Route path="/payments" element={<PaymentsManagement />} />
             <Route
               path="/contracts"
               element={
@@ -4185,11 +4181,19 @@ function InvoiceOnlyPanel({
   const generateInvoice = async () => {
     setBusy(true);
     try {
-      await api.leads.generateInvoice(lead.id, {
+      const generatedPayment = (await api.leads.generateInvoice(lead.id, {
         amount: Number(amount),
         currency: "PHP",
         expectedVersion: lead.version,
-      });
+      })) as Record<string, unknown>;
+      // Move the local card to the payment-proof step immediately. The
+      // follow-up refreshes are still useful, but should not leave the user
+      // stuck on invoice generation while the parent view catches up.
+      setPayment((current) => ({
+        ...(current ?? {}),
+        ...generatedPayment,
+        status: generatedPayment.status ?? "Invoiced",
+      }));
       onNotice({ message: "Invoice generated.", tone: "success" });
       await reload();
       await onReload();
@@ -4997,9 +5001,6 @@ function QualificationPanel({
     queuedAt: lead.welcomeEmailQueuedAt,
     sentAt: lead.welcomeEmailSentAt,
   });
-  const [goodTime, setGoodTime] = useState(
-    normalizedDiscussionTime(lead.goodTimeToDiscuss),
-  );
   const [nurturingSaved, setNurturingSaved] = useState(
     Boolean(lead.productLine && lead.lastCallOutcome),
   );
@@ -5017,7 +5018,6 @@ function QualificationPanel({
           welcomeEmailStatus?: string;
           welcomeEmailQueuedAt?: string;
           welcomeEmailSentAt?: string;
-          goodTimeToDiscuss?: string;
         };
         setNotes(record.notes ?? "");
         setVersion(record.version ?? lead.version);
@@ -5031,11 +5031,6 @@ function QualificationPanel({
           queuedAt: record.welcomeEmailQueuedAt ?? lead.welcomeEmailQueuedAt,
           sentAt: record.welcomeEmailSentAt ?? lead.welcomeEmailSentAt,
         });
-        setGoodTime(
-          normalizedDiscussionTime(
-            record.goodTimeToDiscuss ?? lead.goodTimeToDiscuss,
-          ),
-        );
         setNurturingSaved(
           Boolean(
             (record.productLine ?? lead.productLine) &&
@@ -5056,7 +5051,6 @@ function QualificationPanel({
     const refreshed = await api.leads.get(lead.id);
     await api.leads.recordCallOutcome(lead.id, {
       outcome: callOutcome.trim(),
-      goodTimeToDiscuss: goodTime,
       notes: notes.trim() || null,
       expectedVersion: refreshed.version,
     });
@@ -5072,7 +5066,6 @@ function QualificationPanel({
     const missing = [
       !productLine ? "Product line" : null,
       !callOutcome.trim() ? "Call outcome" : null,
-      !goodTime ? "Preferred discussion time" : null,
     ].filter((item): item is string => Boolean(item));
     if (missing.length) {
       onNotice({
@@ -5104,7 +5097,6 @@ function QualificationPanel({
     const missing = [
       !productLine ? "Product line" : null,
       !callOutcome.trim() ? "Call outcome" : null,
-      !goodTime ? "Preferred discussion time" : null,
       !notes.trim() ? "Contact and assessment notes" : null,
     ].filter((item): item is string => Boolean(item));
     if (missing.length) {
@@ -5220,7 +5212,6 @@ function QualificationPanel({
       {[
         !productLine ? "Product line" : null,
         !callOutcome.trim() ? "Call outcome" : null,
-        !goodTime ? "Preferred discussion time" : null,
       ].some(Boolean) ? (
         <div className="missing-fields-summary" role="status">
           <strong>Still needed</strong>
@@ -5228,7 +5219,6 @@ function QualificationPanel({
             {[
               !productLine ? "Product line" : null,
               !callOutcome.trim() ? "Call outcome" : null,
-              !goodTime ? "Preferred discussion time" : null,
             ]
               .filter(Boolean)
               .join(", ")}
@@ -5294,23 +5284,6 @@ function QualificationPanel({
                     : "Not queued"}</strong>
             <small>Tracked automatically from the email service</small>
           </div>
-          <label>
-            Preferred time to discuss
-            <select
-              value={goodTime}
-              onChange={(e) => {
-                setGoodTime(e.target.value);
-                setNurturingSaved(false);
-              }}
-              aria-invalid={!goodTime}
-              className={!goodTime ? "field-missing" : undefined}
-            >
-              <option value="">Select a preferred time</option>
-              {discussionTimeOptions.map((option) => (
-                <option key={option}>{option}</option>
-              ))}
-            </select>
-          </label>
         </div>
         <button
           type="button"
@@ -5351,10 +5324,11 @@ function QualificationPanel({
         {decision === "follow_up" && (
           <label>
             Follow-up date and time
-            <input
-              type="datetime-local"
+            <BrandedDateTimePicker
               value={followUpAt}
-              onChange={(e) => setFollowUpAt(e.target.value)}
+              onChange={setFollowUpAt}
+              selectedLabel="Follow-up scheduled"
+              emptyLabel="Required · choose a date and time"
               required
             />
           </label>
@@ -5549,6 +5523,30 @@ function LocationAnalysisPanel({
   );
 }
 
+function DocumentDropzone({ file, onChange }: { file: File | null; onChange: (file?: File) => void }) {
+  return (
+    <label
+      className={`document-dropzone ${file ? "has-file" : ""}`}
+      onDragOver={(event) => event.preventDefault()}
+      onDrop={(event) => {
+        event.preventDefault();
+        onChange(event.dataTransfer.files?.[0]);
+      }}
+    >
+      <FileText size={22} />
+      <span>
+        {file ? <strong>{file.name}</strong> : <>Drag and drop or <strong>browse file</strong></>}
+      </span>
+      <input
+        key={file?.name ?? "empty-document"}
+        type="file"
+        accept="application/pdf,image/jpeg,image/png"
+        onChange={(event) => onChange(event.target.files?.[0])}
+      />
+    </label>
+  );
+}
+
 function DocumentsPanel({
   lead,
   onNotice,
@@ -5562,6 +5560,7 @@ function DocumentsPanel({
   compactAfterUpload = false,
   documentCard = false,
   hideEmptyState = false,
+  relatedPaymentId,
 }: {
   lead: Pick<Lead, "id">;
   onNotice: (notice: Notice) => void;
@@ -5575,6 +5574,7 @@ function DocumentsPanel({
   compactAfterUpload?: boolean;
   documentCard?: boolean;
   hideEmptyState?: boolean;
+  relatedPaymentId?: string;
 }) {
   const [documents, setDocuments] = useState<DocumentItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -5585,7 +5585,7 @@ function DocumentsPanel({
   const [busy, setBusy] = useState(false);
   const [replaceMode, setReplaceMode] = useState(false);
   const canUpload =
-    fixedDocumentType === "PAYMENT_RECEIPT"
+    fixedDocumentType === "PAYMENT_RECEIPT" || fixedDocumentType === "BALANCE_PAYMENT_RECEIPT"
       ? hasRole(session.user?.role, ["SalesAgent", "GeneralManager"])
       : hasRole(session.user?.role, ["SalesAgent", "GeneralManager"]);
   const uploadOptions: [string, string][] = [
@@ -5603,9 +5603,11 @@ function DocumentsPanel({
         ] as [string, string][])
       : []),
   ];
-  const typeFilteredDocuments = visibleTypes?.length
-    ? documents.filter((item) => visibleTypes.includes(item.documentType))
-    : documents;
+  const typeFilteredDocuments = fixedDocumentType
+    ? documents.filter((item) => item.documentType === fixedDocumentType && (!relatedPaymentId || item.relatedPaymentId === relatedPaymentId))
+    : visibleTypes?.length
+      ? documents.filter((item) => visibleTypes.includes(item.documentType))
+      : documents;
   const uploadedDocuments = typeFilteredDocuments.filter(
     (item) => item.status === "Uploaded",
   );
@@ -5641,6 +5643,7 @@ function DocumentsPanel({
         fileName: file.name,
         contentType: file.type || "application/octet-stream",
         sizeBytes: file.size,
+        relatedPaymentId,
       });
       const response = await fetch(intent.uploadUrl, {
         method: "PUT",
@@ -5712,38 +5715,7 @@ function DocumentsPanel({
               ))}
             </select>
           )}
-          {embedded ? (
-            <label
-              className={`document-dropzone ${file ? "has-file" : ""}`}
-              onDragOver={(event) => event.preventDefault()}
-              onDrop={(event) => {
-                event.preventDefault();
-                selectFile(event.dataTransfer.files?.[0]);
-              }}
-            >
-              <FileText size={22} />
-              <span>
-                {file ? (
-                  <strong>{file.name}</strong>
-                ) : (
-                  <>Drag and drop or <strong>browse file</strong></>
-                )}
-              </span>
-              <input
-                type="file"
-                accept="application/pdf,image/jpeg,image/png"
-                onChange={(e) => selectFile(e.target.files?.[0])}
-                required
-              />
-            </label>
-          ) : (
-            <input
-              type="file"
-              accept="application/pdf,image/jpeg,image/png"
-              onChange={(e) => selectFile(e.target.files?.[0])}
-              required
-            />
-          )}
+          <DocumentDropzone file={file} onChange={selectFile} />
           <button className="button button-primary" disabled={busy || !file}>
             {busy ? "Uploading…" : embedded ? "Upload file" : "Upload private file"}
           </button>
@@ -5817,6 +5789,8 @@ function DocumentsPanel({
           title={
             fixedDocumentType === "PAYMENT_RECEIPT"
               ? "No payment evidence attached"
+              : fixedDocumentType === "BALANCE_PAYMENT_RECEIPT"
+                ? "No balance payment proof attached"
               : fixedDocumentType === "FLOOR_PLAN"
                 ? "No floor plan uploaded"
               : fixedDocumentType === "PERSPECTIVE"
@@ -5828,6 +5802,8 @@ function DocumentsPanel({
           text={
             fixedDocumentType === "PAYMENT_RECEIPT"
               ? "The Sales Agent attaches a receipt screenshot, bank confirmation, or PDF before Finance verification."
+              : fixedDocumentType === "BALANCE_PAYMENT_RECEIPT"
+                ? "Attach the receipt or bank confirmation for this balance payment before Finance verification."
               : fixedDocumentType === "FLOOR_PLAN"
                 ? "Upload the floor plan required before the contract is submitted for GM review."
               : fixedDocumentType === "PERSPECTIVE"
@@ -7456,7 +7432,7 @@ function AdminEndorsementPanel({
 
 function AuditPanel({ leadId }: { leadId: string }) {
   const [logs, setLogs] = useState<
-    { id: string; leadId?: string; action: string; createdAt: string }[]
+    { id: string; leadId?: string; action: string; message?: string; actorName?: string; fromState?: string; toState?: string; createdAt: string }[]
   >([]);
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
@@ -7490,7 +7466,8 @@ function AuditPanel({ leadId }: { leadId: string }) {
               </div>
               <div>
                 <strong>{log.action}</strong>
-                <span>{formatDate(log.createdAt)}</span>
+                <span>{log.message || "Workflow activity recorded."}</span>
+                <small>{formatDateTime(log.createdAt)}{log.actorName ? ` · ${log.actorName}` : ""}</small>
               </div>
             </div>
           ))}
@@ -8184,23 +8161,23 @@ function FinanceWorkbench() {
   const totalPages = Math.max(1, Math.ceil((result?.total ?? 0) / (result?.pageSize ?? 20)));
   const items = result?.items ?? [];
   const subtitle = view === "action"
-    ? "Review submitted payments before the franchise workflow can continue."
-    : "Find every submitted payment and see who confirmed it, when, and why.";
+    ? "Review submitted down payments before the franchise workflow can continue."
+    : "Find every submitted down payment and see who confirmed it, when, and why.";
 
   return (
     <Page title="Finance" subtitle={subtitle}>
       {notice && <NoticeBar notice={notice} onClose={() => setNotice(null)} />}
       <div className="finance-metrics">
-        <FinanceMetric label="Awaiting review" value={String(result?.awaitingCount ?? 0)} hint="Submitted packages" tone="amber" icon={Clock3} />
-        <FinanceMetric label="Pending amount" value={formatMoney(result?.pendingAmount ?? 0)} hint="Awaiting confirmation" tone="red" icon={WalletCards} />
-        <FinanceMetric label="Confirmed this month" value={formatMoney(result?.confirmedThisMonth ?? 0)} hint="Confirmed collections" tone="green" icon={CheckCircle2} />
-        <FinanceMetric label="Exceptions" value={String(result?.exceptionCount ?? 0)} hint="Returned or cancelled" tone="slate" icon={AlertTriangle} />
+        <FinanceMetric label="Down payments awaiting review" value={String(result?.awaitingCount ?? 0)} hint="Submitted packages" tone="amber" icon={Clock3} />
+        <FinanceMetric label="Down payments pending" value={formatMoney(result?.pendingAmount ?? 0)} hint="Awaiting confirmation" tone="red" icon={WalletCards} />
+        <FinanceMetric label="Down payments confirmed" value={formatMoney(result?.confirmedThisMonth ?? 0)} hint="Confirmed this month" tone="green" icon={CheckCircle2} />
+        <FinanceMetric label="Down-payment exceptions" value={String(result?.exceptionCount ?? 0)} hint="Returned or cancelled" tone="slate" icon={AlertTriangle} />
       </div>
       <section className="panel finance-workbench-panel">
-        <div className="finance-workbench-header"><div><h2>Payment operations</h2><p>Keep payment review and payment history in one auditable workspace.</p></div>{view === "history" && <button className="button button-secondary" onClick={exportCurrentView} disabled={!items.length}><FileText size={15} /> Export</button>}</div>
+          <div className="finance-workbench-header"><div><h2>Down-payment operations</h2><p>Review down-payment invoices and history here. Balance-payment reviews are managed in Payments &amp; balances.</p></div><div className="finance-workbench-header-actions">{view === "history" && <button className="button button-secondary" onClick={exportCurrentView} disabled={!items.length}><FileText size={15} /> Export</button>}<NavLink className="button button-secondary" to="/payments"><WalletCards size={15} /> Open payment accounts</NavLink></div></div>
         <div className="queue-view-tabs finance-view-tabs" role="tablist" aria-label="Finance view">
-          <button className={view === "action" ? "active" : ""} role="tab" aria-selected={view === "action"} onClick={() => changeView("action")}>Action required <span>{result?.awaitingCount ?? 0}</span></button>
-          <button className={view === "history" ? "active" : ""} role="tab" aria-selected={view === "history"} onClick={() => changeView("history")}>Payment history</button>
+          <button className={view === "action" ? "active" : ""} role="tab" aria-selected={view === "action"} onClick={() => changeView("action")}>Down-payment action required <span>{result?.awaitingCount ?? 0}</span></button>
+          <button className={view === "history" ? "active" : ""} role="tab" aria-selected={view === "history"} onClick={() => changeView("history")}>Down-payment history</button>
         </div>
         <div className="finance-toolbar">
           <label className="finance-search"><Search size={16} /><input value={search} onChange={(event) => changeFilter(setSearch, event.target.value)} placeholder="Search lead or invoice…" /></label>
@@ -8209,11 +8186,242 @@ function FinanceWorkbench() {
           <label><span>Owner</span><select value={ownerId} onChange={(event) => changeFilter(setOwnerId, event.target.value)}><option value="">All owners</option>{owners.map((owner) => <option key={owner.id} value={owner.id}>{owner.displayName}</option>)}</select></label>
         </div>
         {error && <div className="form-error">{error}</div>}
-        {loading ? <Loading /> : items.length ? <><div className="finance-table-wrap"><div className="finance-table finance-table-heading"><span>Lead / franchise</span><span>Invoice</span><span>Amount</span><span>Submitted</span><span>Age</span><span>Status</span><span /></div>{items.map((item) => <FinancePaymentRow key={item.paymentId} item={item} onOpen={() => setSelectedPaymentId(item.paymentId)} />)}</div><FinancePagination page={page} totalPages={totalPages} total={result?.total ?? 0} onChange={setPage} /></> : <div className="finance-empty"><CheckCircle2 size={22} /><strong>{view === "action" ? "No payments awaiting review" : "No payment history matches"}</strong><span>{view === "action" ? "New submitted payment packages will appear here." : "Try a different search, status, owner, or date filter."}</span></div>}
+        {loading ? <Loading /> : items.length ? <><div className="finance-table-wrap"><div className="finance-table finance-table-heading"><span>Lead / franchise</span><span>Invoice</span><span>Amount</span><span>Submitted</span><span>Age</span><span>Status</span><span /></div>{items.map((item) => <FinancePaymentRow key={item.paymentId} item={item} onOpen={() => setSelectedPaymentId(item.paymentId)} />)}</div><FinancePagination page={page} totalPages={totalPages} total={result?.total ?? 0} onChange={setPage} /></> : <div className="finance-empty"><CheckCircle2 size={22} /><strong>{view === "action" ? "No down payments awaiting review" : "No down-payment history matches"}</strong><span>{view === "action" ? "New submitted down-payment packages will appear here. Balance payments are available in Payments & balances." : "Try a different search, status, owner, or date filter."}</span></div>}
       </section>
       {selectedPaymentId && <FinancePaymentDrawer paymentId={selectedPaymentId} onClose={() => setSelectedPaymentId(null)} onConfirmed={() => { setSelectedPaymentId(null); setNotice({ message: "Payment confirmed and the finance history was updated.", tone: "success" }); setPage(1); }} />}
     </Page>
   );
+}
+
+function PaymentsManagement() {
+  const role = session.user?.role;
+  if (!hasRole(role, ["SalesAgent", "GeneralManager", "Finance", "Leadership"])) return <Navigate to="/" replace />;
+  const realtimeRevision = useRealtimeRefresh();
+  const [result, setResult] = useState<PaymentManagementResponse | null>(null);
+  const [search, setSearch] = useState("");
+  const [status, setStatus] = useState("all");
+  const [page, setPage] = useState(1);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState<Notice | null>(null);
+  const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null);
+  const [refreshTick, setRefreshTick] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    const params = new URLSearchParams({ page: String(page), pageSize: "20" });
+    if (search.trim()) params.set("search", search.trim());
+    if (status !== "all") params.set("status", status);
+    setLoading(true); setError("");
+    api.payments.list(`?${params.toString()}`).then((value) => { if (!cancelled) setResult(value); }).catch((e) => { if (!cancelled) setError(errorMessage(e, "Unable to load payment balances.")); }).finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [page, search, status, realtimeRevision, refreshTick]);
+
+  const totalPages = Math.max(1, Math.ceil((result?.total ?? 0) / (result?.pageSize ?? 20)));
+  const changeFilter = (setter: (value: string) => void, value: string) => { setter(value); setPage(1); };
+  return <Page title="Payments & balances" subtitle="Track the down payment, record balance payments, and keep the remaining amount visible at every step.">
+    {notice && <NoticeBar notice={notice} onClose={() => setNotice(null)} />}
+    <div className="finance-metrics"><FinanceMetric label="Total collected" value={formatMoney(result?.totalCollected ?? 0)} hint="Confirmed down payment and balance" tone="green" icon={CheckCircle2} /><FinanceMetric label="Outstanding balance" value={formatMoney(result?.totalOutstanding ?? 0)} hint="Across payment accounts" tone="amber" icon={WalletCards} /><FinanceMetric label="Pending verification" value={String(result?.pendingVerificationCount ?? 0)} hint="Balance payments awaiting Finance" tone="orange" icon={Clock3} /><FinanceMetric label="Paid in full" value={String(result?.paidInFullCount ?? 0)} hint="Ready for the next workflow step" tone="slate" icon={ShieldCheck} /></div>
+    <section className="panel finance-workbench-panel"><div className="finance-workbench-header"><div><h2>Franchisee payment accounts</h2><p>Open an account to see the ledger, upload payment proof, or view the acknowledgement receipt.</p></div></div><div className="finance-toolbar"><label className="finance-search"><Search size={16} /><input value={search} onChange={(event) => changeFilter(setSearch, event.target.value)} placeholder="Search franchisee, email, or contact…" /></label><label><span>Payment status</span><select value={status} onChange={(event) => changeFilter(setStatus, event.target.value)}><option value="all">All accounts</option><option value="AwaitingDownPayment">Awaiting down payment</option><option value="DownPaymentOnly">Down payment only</option><option value="BalancePending">Balance pending verification</option><option value="PartiallyPaid">Partially paid</option><option value="PaidInFull">Paid in full</option></select></label></div>{error && <div className="form-error">{error}</div>}{loading ? <Loading /> : result?.items.length ? <><div className="finance-table-wrap"><div className="finance-table finance-table-heading"><span>Franchisee</span><span>Total fee</span><span>Down payment</span><span>Balance paid</span><span>Remaining</span><span>Status</span><span /></div>{result.items.map((item) => <PaymentManagementRow key={item.leadId} item={item} onOpen={() => setSelectedLeadId(item.leadId)} />)}</div><FinancePagination page={page} totalPages={totalPages} total={result.total} onChange={setPage} /></> : <div className="finance-empty"><WalletCards size={22} /><strong>No payment accounts match</strong><span>Payment accounts appear after a down-payment invoice has been configured.</span></div>}</section>
+    {selectedLeadId && <PaymentAccountDrawer leadId={selectedLeadId} onClose={() => setSelectedLeadId(null)} onAccountUpdated={() => { setRefreshTick((value) => value + 1); setNotice({ message: "Payment account updated.", tone: "success" }); }} />}
+  </Page>;
+}
+
+function PaymentManagementRow({ item, onOpen }: { item: PaymentManagementItem; onOpen: () => void }) {
+  return <button className="finance-table finance-table-row" onClick={onOpen} type="button"><span className="finance-lead-cell"><span className="avatar avatar-tiny">{initials(item.leadName)}</span><span><strong>{item.leadName}</strong><small>{item.location ?? "Location not provided"} · {item.ownerName}</small></span></span><span className="finance-amount-cell">{formatMoney(item.totalAmount, item.currency)}</span><span>{formatMoney(item.downPaymentAmount, item.currency)}</span><span>{formatMoney(item.confirmedBalance, item.currency)}{item.pendingBalance > 0 ? <small className="table-subtext">+ {formatMoney(item.pendingBalance, item.currency)} pending</small> : null}</span><span className="finance-amount-cell">{formatMoney(item.remainingBalance, item.currency)}</span><span><span className={`finance-status ${item.paymentStatus.toLowerCase()}`}>{statusLabel(item.paymentStatus)}</span></span><ChevronRight size={16} /></button>;
+}
+
+function PaymentAccountDrawer({ leadId, onClose, onAccountUpdated }: { leadId: string; onClose: () => void; onAccountUpdated?: () => void }) {
+  const [account, setAccount] = useState<PaymentAccount | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [amount, setAmount] = useState("");
+  const [paidAt, setPaidAt] = useState(() => localDateTimeValue(new Date()));
+  const [method, setMethod] = useState("Bank transfer");
+  const [reference, setReference] = useState("");
+  const [notes, setNotes] = useState("");
+  const [proofFile, setProofFileState] = useState<File | null>(null);
+  const [returningPayment, setReturningPayment] = useState<BalancePayment | null>(null);
+  const [returnReason, setReturnReason] = useState("");
+  const [returnError, setReturnError] = useState("");
+  const canRecord = hasRole(session.user?.role, ["SalesAgent", "GeneralManager"]);
+  const canConfirm = hasRole(session.user?.role, ["Finance"]);
+  const availableBalance = account ? Math.max(0, account.remainingBalance - account.pendingBalance) : 0;
+  const selectProofFile = (file?: File) => {
+    setError("");
+    if (!file) {
+      setProofFileState(null);
+      return;
+    }
+    const contentType = file.type.trim().toLowerCase();
+    const extension = file.name.toLowerCase().slice(file.name.lastIndexOf("."));
+    const validExtension = (contentType === "application/pdf" && extension === ".pdf")
+      || (contentType === "image/jpeg" && [".jpg", ".jpeg"].includes(extension))
+      || (contentType === "image/png" && extension === ".png");
+    if (!validExtension) {
+      setProofFileState(null);
+      setError("Payment proof must be a matching PDF, JPG, or PNG file.");
+      return;
+    }
+    if (file.size <= 0) {
+      setProofFileState(null);
+      setError("The selected payment proof is empty. Choose a different file.");
+      return;
+    }
+    if (file.size > 25_000_000) {
+      setProofFileState(null);
+      setError("Payment proof must be 25 MB or smaller.");
+      return;
+    }
+    setProofFileState(file);
+  };
+  const setProofFile = (file: File | null) => selectProofFile(file ?? undefined);
+  const changeAmount = (value: string) => {
+    setError("");
+    if (!value.trim()) {
+      setAmount("");
+      return;
+    }
+    const numericValue = Number(value);
+    if (Number.isFinite(numericValue) && numericValue > availableBalance) {
+      setAmount(availableBalance.toFixed(2));
+      return;
+    }
+    setAmount(value);
+  };
+  const load = async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const nextAccount = await api.leads.paymentAccount(leadId);
+      setAccount(nextAccount);
+      const nextAvailableBalance = Math.max(0, nextAccount.remainingBalance - nextAccount.pendingBalance);
+      setAmount((current) => current.trim() ? current : nextAvailableBalance.toFixed(2));
+    } catch (e) {
+      setError(errorMessage(e, "Unable to load the payment account."));
+    } finally {
+      setLoading(false);
+    }
+  };
+  useEffect(() => { void load(); }, [leadId]);
+  useEffect(() => { const escape = (event: KeyboardEvent) => event.key === "Escape" && onClose(); window.addEventListener("keydown", escape); return () => window.removeEventListener("keydown", escape); }, [onClose]);
+  useEffect(() => {
+    if (!account) return;
+    const cap = Math.max(0, account.remainingBalance - account.pendingBalance);
+    setAmount((current) => {
+      if (!current.trim()) return cap.toFixed(2);
+      const numericValue = Number(current);
+      return Number.isFinite(numericValue) && numericValue > cap ? cap.toFixed(2) : current;
+    });
+  }, [account?.remainingBalance, account?.pendingBalance]);
+  const receipt = async () => { const popup = window.open("about:blank", "_blank", "noopener,noreferrer"); try { const result = await api.leads.acknowledgementReceiptDownload(leadId); if (popup) popup.location.href = result.downloadUrl; else window.open(result.downloadUrl, "_blank", "noopener,noreferrer"); } catch (e) { popup?.close(); setError(errorMessage(e, "Unable to open the acknowledgement receipt.")); } };
+  const balanceReceipt = async (payment: BalancePayment) => { const popup = window.open("about:blank", "_blank", "noopener,noreferrer"); try { const result = await api.leads.balanceAcknowledgementReceiptDownload(payment.id); if (popup) popup.location.href = result.downloadUrl; else window.open(result.downloadUrl, "_blank", "noopener,noreferrer"); } catch (e) { popup?.close(); setError(errorMessage(e, "Unable to open the balance acknowledgement receipt.")); } };
+  const uploadProof = async (payment: BalancePayment, file: File) => {
+    const intent = await api.leads.uploadIntent(leadId, {
+      documentType: "BALANCE_PAYMENT_RECEIPT",
+      fileName: file.name,
+      contentType: file.type || "application/octet-stream",
+      sizeBytes: file.size,
+      relatedPaymentId: payment.id,
+    });
+    const response = await fetch(intent.uploadUrl, {
+      method: "PUT",
+      headers: {
+        "Content-Type": intent.requiredContentType,
+        "x-amz-server-side-encryption": "AES256",
+      },
+      body: file,
+    });
+    if (!response.ok) throw new Error("Private storage rejected the payment proof upload.");
+    const digest = await crypto.subtle.digest("SHA-256", await file.arrayBuffer());
+    const hash = Array.from(new Uint8Array(digest))
+      .map((byte) => byte.toString(16).padStart(2, "0"))
+      .join("");
+    await api.leads.completeUpload(leadId, intent.documentId, {
+      documentId: intent.documentId,
+      objectKey: intent.objectKey,
+      sha256: hash,
+    });
+  };
+  const record = async (event: FormEvent) => {
+    event.preventDefault();
+    const issues: string[] = [];
+    const numericAmount = Number(amount);
+    const selectedDate = paidAt ? parseLocalDateTime(paidAt) : null;
+    const selectedProofFile = proofFile;
+    if (!amount.trim()) issues.push("Amount is required.");
+    else if (!Number.isFinite(numericAmount) || numericAmount <= 0) issues.push("Amount must be greater than zero.");
+    else if (Math.abs(numericAmount - Math.round(numericAmount * 100) / 100) > 0.000001) issues.push("Amount can have no more than two decimal places.");
+    else if (account && numericAmount > availableBalance) issues.push(`Amount cannot exceed the available balance of ${formatMoney(availableBalance, account.currency)} after pending payments.`);
+    if (!paidAt) issues.push("Payment date and time is required.");
+    else if (!selectedDate) issues.push("Payment date and time is invalid.");
+    else if (selectedDate.getTime() > Date.now() + 5 * 60 * 1000) issues.push("Payment date and time cannot be in the future.");
+    if (!method.trim()) issues.push("Payment method is required.");
+    if (!reference.trim()) issues.push("Reference number is required.");
+    else if (reference.trim().length < 2) issues.push("Reference number must be at least 2 characters.");
+    else if (reference.trim().length > 120) issues.push("Reference number must be 120 characters or fewer.");
+    if (!selectedProofFile) issues.push("Payment proof is required.");
+    if (issues.length) {
+      setError(issues.join(" "));
+      return;
+    }
+    if (!selectedProofFile) return;
+    setBusy(true);
+    setError("");
+    try {
+      const payment = await api.leads.createBalancePayment(leadId, {
+        amount: numericAmount,
+        currency: account?.currency ?? "PHP",
+        paidAt: selectedDate!.toISOString(),
+        paymentMethod: method,
+        referenceNumber: reference.trim(),
+        notes: notes.trim() || null,
+        expectedVersion: account?.leadVersion,
+      });
+      let proofError: unknown = null;
+      try {
+        await uploadProof(payment, selectedProofFile);
+      } catch (e) {
+        proofError = e;
+      }
+      setAmount("");
+      setReference("");
+      setNotes("");
+      setProofFile(null);
+      await load();
+      onAccountUpdated?.();
+      if (proofError) {
+        setError(`Balance payment recorded, but the proof upload failed. ${errorMessage(proofError, "Please upload it from the payment ledger.")}`);
+      }
+    } catch (e) {
+      setError(errorMessage(e, "Unable to record this balance payment."));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const confirm = async (payment: BalancePayment) => { setBusy(true); setError(""); try { await api.leads.confirmBalancePayment(payment.id); await load(); onAccountUpdated?.(); } catch (e) { setError(errorMessage(e, "Unable to confirm this balance payment.")); } finally { setBusy(false); } };
+  const openReturnDialog = (payment: BalancePayment) => {
+    setReturningPayment(payment);
+    setReturnReason("");
+    setReturnError("");
+  };
+  const returnPayment = async (payment: BalancePayment, reason: string) => {
+    setBusy(true);
+    setReturnError("");
+    try {
+      await api.leads.returnBalancePayment(payment.id, { reason });
+      setReturningPayment(null);
+      setReturnReason("");
+      await load();
+      onAccountUpdated?.();
+    } catch (e) {
+      setReturnError(errorMessage(e, "Unable to return this balance payment."));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return <div className="finance-drawer-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><aside className="finance-drawer" role="dialog" aria-modal="true" aria-labelledby="payment-account-title"><div className="finance-drawer-header"><div><span className="eyebrow">PAYMENT ACCOUNT</span><h2 id="payment-account-title">{loading ? "Loading account…" : account?.leadName ?? "Payment details"}</h2>{account && <p>{account.address || "Address not provided"} · {account.productLine ?? "Franchise package"}</p>}</div><button className="icon-button" onClick={onClose} aria-label="Close payment account"><X size={18} /></button></div>{error && <div className="form-error">{error}</div>}{loading ? <Loading /> : account ? <><div className="payment-account-summary"><Info label="Total fee" value={formatMoney(account.totalAmount, account.currency)} /><Info label="Confirmed collected" value={formatMoney((account.downPaymentStatus === "Confirmed" ? account.downPaymentAmount : 0) + account.confirmedBalance, account.currency)} /><Info label="Remaining" value={formatMoney(account.remainingBalance, account.currency)} /><Info label="Pending review" value={formatMoney(account.pendingBalance, account.currency)} /></div><div className="finance-drawer-section"><div className="section-heading-inline"><div><h3>Down payment</h3><p>{statusLabel(account.downPaymentStatus)}</p></div>{account.downPaymentStatus === "Confirmed" && <button className="button button-secondary" onClick={receipt}><FileText size={15} /> View AR</button>}</div><small className="muted">{account.acknowledgementReceiptNumber ? `Acknowledgement receipt ${account.acknowledgementReceiptNumber}` : account.downPaymentStatus === "Confirmed" ? "Acknowledgement receipt will be prepared when opened." : "Available after Finance confirms the down payment."}</small></div><div className="finance-drawer-section"><h3>Balance payment ledger</h3>{account.balancePayments.length ? <div className="payment-ledger">{account.balancePayments.map((payment) => <div className="payment-ledger-row" key={payment.id}><div><strong>{formatMoney(payment.amount, payment.currency)}</strong><span>{payment.paymentMethod} · {payment.referenceNumber}</span><small>{formatDateTime(payment.paidAt)} · {statusLabel(payment.status)}</small>{payment.acknowledgementReceiptNumber && <small className="payment-receipt-number">Receipt {payment.acknowledgementReceiptNumber}</small>}{payment.returnReason && <small className="form-error-inline">{payment.returnReason}</small>}</div><div>{payment.status === "Submitted" && canConfirm ? <div className="payment-ledger-actions"><button className="button button-primary" disabled={busy || !payment.hasEvidence} onClick={() => confirm(payment)}>{payment.hasEvidence ? "Confirm" : "Proof required"}</button><button className="text-link" disabled={busy} onClick={() => openReturnDialog(payment)}>Return</button></div> : payment.status === "Confirmed" ? <div className="payment-ledger-actions"><span className={`finance-status ${payment.status.toLowerCase()}`}>{statusLabel(payment.status)}</span><button className="button button-secondary" disabled={busy} onClick={() => balanceReceipt(payment)}><FileText size={13} /> View receipt</button></div> : <span className={`finance-status ${payment.status.toLowerCase()}`}>{statusLabel(payment.status)}</span>}</div></div>)}</div> : <p className="muted">No balance payments recorded yet.</p>}</div>{canRecord && account.downPaymentStatus === "Confirmed" && account.remainingBalance > 0 && availableBalance <= 0 && <div className="finance-drawer-section"><h3>Balance payment on hold</h3><p className="muted">A balance payment is awaiting Finance verification. Record another payment after it is confirmed or returned.</p></div>}{canRecord && account.downPaymentStatus === "Confirmed" && availableBalance > 0 && <div className="finance-drawer-section"><h3>Record a balance payment</h3><p className="muted">This records an offline or manually verified payment. Finance confirms it after the proof is uploaded.</p><form className="stack-form" onSubmit={record}><label><span>Amount <span className="required-mark">*</span></span><input type="number" min="0.01" step="0.01" value={amount} onChange={(event) => changeAmount(event.target.value)} max={availableBalance} placeholder={availableBalance.toFixed(2)} aria-required="true" /></label><label><span>Payment date and time <span className="required-mark">*</span></span><BrandedDateTimePicker value={paidAt} onChange={setPaidAt} selectedLabel="Payment date" emptyLabel="Required · choose a date and time" required /></label><label><span>Payment method <span className="required-mark">*</span></span><select value={method} onChange={(event) => setMethod(event.target.value)}><option>Bank transfer</option><option>Cash</option><option>Cheque</option><option>Online transfer</option><option>Other</option></select></label><label><span>Reference number <span className="required-mark">*</span></span><input value={reference} onChange={(event) => setReference(event.target.value)} maxLength={120} aria-required="true" placeholder="Bank or receipt reference" /></label><div className="payment-proof-field"><span>Payment proof <span className="required-mark">*</span></span><DocumentDropzone file={proofFile} onChange={(file) => setProofFile(file ?? null)} /><small className="muted">Required — attach the receipt or bank confirmation before recording this payment.</small></div><label>Notes (optional)<textarea value={notes} onChange={(event) => setNotes(event.target.value)} maxLength={2000} placeholder="Add context Finance should see." /></label><button className="button button-primary button-wide" disabled={busy}>{busy ? "Saving…" : "Record balance payment"}</button></form></div>}{account.balancePayments.filter((payment) => payment.status === "Submitted").map((payment) => <div className="finance-drawer-section" key={`proof-${payment.id}`}><h3>Proof for {formatMoney(payment.amount, payment.currency)}</h3><DocumentsPanel lead={{ id: account.leadId }} fixedDocumentType="BALANCE_PAYMENT_RECEIPT" relatedPaymentId={payment.id} onNotice={({ message }) => setError(message)} onDocumentsChanged={load} uploadedOnly documentCard /></div>)}</> : null}{returningPayment && <Modal title="Return balance payment" subtitle="Send this payment back for correction with a clear reason for the submitter." onClose={() => { if (!busy) setReturningPayment(null); }}><form className="stack-form" onSubmit={(event) => { event.preventDefault(); const reason = returnReason.trim(); if (reason.length < 2) { setReturnError("Enter at least 2 characters explaining the correction needed."); return; } void returnPayment(returningPayment, reason); }}><p className="muted">Payment {returningPayment.referenceNumber} · {formatMoney(returningPayment.amount, returningPayment.currency)}</p><label><span>Reason for return <span className="required-mark">*</span></span><textarea autoFocus maxLength={2000} value={returnReason} onChange={(event) => { setReturnReason(event.target.value); setReturnError(""); }} placeholder="Explain what needs to be corrected before Finance can confirm this payment." /></label>{returnError && <div className="form-error">{returnError}</div>}<div className="form-actions"><button type="button" className="button button-secondary" onClick={() => setReturningPayment(null)} disabled={busy}>Cancel</button><button className="button button-primary" disabled={busy}>{busy ? "Returning…" : "Return payment"}</button></div></form></Modal>}</aside></div>;
 }
 
 function FinanceMetric({ label, value, hint, tone, icon: IconComponent }: { label: string; value: string; hint: string; tone: string; icon: Icon }) {
@@ -9064,6 +9272,8 @@ function UserManagementContent() {
   const [loading, setLoading] = useState(true);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [editor, setEditor] = useState<{ mode: "create" | "edit"; user?: UserRecord } | null>(null);
+  const [deactivationTarget, setDeactivationTarget] = useState<UserRecord | null>(null);
+  const [deactivatingId, setDeactivatingId] = useState<string | null>(null);
   const canManageUsers = hasRole(session.user?.role, ["GeneralManager"]);
   const pageSize = 10;
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
@@ -9100,13 +9310,16 @@ function UserManagementContent() {
   };
 
   const deactivate = async (user: UserRecord) => {
-    if (!window.confirm(`Deactivate ${user.displayName}? They will no longer be able to sign in.`)) return;
+    setDeactivatingId(user.id);
     try {
       await api.users.deactivate(user.id);
+      setDeactivationTarget(null);
       setNotice({ message: `${user.displayName} was deactivated.`, tone: "success" });
       await load();
     } catch (e) {
       setNotice({ message: errorMessage(e, "Unable to deactivate user."), tone: "error" });
+    } finally {
+      setDeactivatingId(null);
     }
   };
 
@@ -9126,12 +9339,13 @@ function UserManagementContent() {
         {loading ? <Loading /> : users.length === 0 ? <EmptyState icon={UsersRound} title="No users found" text="Try another search or create the first account." /> : (
           <div className="user-table-wrap"><table className="user-table"><thead><tr><th>User</th><th>Assigned roles</th><th>Active role</th><th>Status</th><th>Created</th><th /></tr></thead><tbody>{users.map((user) => {
             const roles = user.roles?.length ? user.roles : [user.role];
-            return <tr key={user.id}><td><div className="user-table-name"><div className="avatar">{initials(user.displayName)}</div><span><strong>{user.displayName}</strong><small>{user.email}</small></span></div></td><td><div className="role-pills">{roles.map((role) => <span key={role} className="role-pill">{roleLabel(role)}</span>)}</div></td><td><span className="active-role-label">{roleLabel(user.role)}</span></td><td><span className={`account-status ${user.isActive ? "active" : "inactive"}`}>{user.isActive ? "Active" : "Inactive"}</span></td><td className="muted">{formatDate(user.createdAt)}</td><td>{canManageUsers && <div className="table-actions"><button className="button button-quiet" onClick={() => setEditor({ mode: "edit", user })}>Edit access</button>{user.isActive && user.id !== session.user?.id && <button className="button button-quiet danger" onClick={() => void deactivate(user)}>Deactivate</button>}</div>}</td></tr>;
+            return <tr key={user.id}><td><div className="user-table-name"><div className="avatar">{initials(user.displayName)}</div><span><strong>{user.displayName}</strong><small>{user.email}</small></span></div></td><td><div className="role-pills">{roles.map((role) => <span key={role} className="role-pill">{roleLabel(role)}</span>)}</div></td><td><span className="active-role-label">{roleLabel(user.role)}</span></td><td><span className={`account-status ${user.isActive ? "active" : "inactive"}`}>{user.isActive ? "Active" : "Inactive"}</span></td><td className="muted">{formatDate(user.createdAt)}</td><td>{canManageUsers && <div className="table-actions"><button className="button button-quiet" onClick={() => setEditor({ mode: "edit", user })}>Edit access</button>{user.isActive && user.id !== session.user?.id && <button className="button button-quiet danger" onClick={() => setDeactivationTarget(user)}>Deactivate</button>}</div>}</td></tr>;
           })}</tbody></table></div>
         )}
         <div className="pagination-bar"><span className="muted">Page {page} of {totalPages}</span><div><button className="button button-secondary" disabled={page <= 1} onClick={() => setPage((value) => value - 1)}><ChevronLeft size={15} /> Previous</button><button className="button button-secondary" disabled={page >= totalPages} onClick={() => setPage((value) => value + 1)}>Next <ChevronRight size={15} /></button></div></div>
       </section>
       {editor && <Modal title={editor.mode === "create" ? "Create user" : "Edit user access"} subtitle={editor.mode === "create" ? "Add a user and send a secure activation email." : "Assign one or more roles and choose the role used for the next session."} onClose={() => setEditor(null)}><UserEditorForm mode={editor.mode} user={editor.user} onSubmit={submit} onCancel={() => setEditor(null)} /></Modal>}
+      {deactivationTarget && <Modal title="Deactivate user" subtitle="This will prevent the user from signing in until an administrator reactivates the account." onClose={() => { if (!deactivatingId) setDeactivationTarget(null); }}><p className="muted">Deactivate <strong>{deactivationTarget.displayName}</strong>? Their existing workspace access will be disabled.</p><div className="form-actions"><button type="button" className="button button-secondary" onClick={() => setDeactivationTarget(null)} disabled={Boolean(deactivatingId)}>Cancel</button><button type="button" className="button button-primary" onClick={() => void deactivate(deactivationTarget)} disabled={Boolean(deactivatingId)}>{deactivatingId ? "Deactivating…" : "Deactivate user"}</button></div></Modal>}
     </Page>
   );
 }
@@ -10060,10 +10274,12 @@ function TaskForm({
       </label>
       <label>
         Due date and time
-        <input
-          type="datetime-local"
+        <BrandedDateTimePicker
           value={dueAt}
-          onChange={(e) => setDueAt(e.target.value)}
+          onChange={setDueAt}
+          selectedLabel="Task due date"
+          emptyLabel="Optional · choose a due date and time"
+          clearLabel="Clear task due date"
         />
       </label>
       <button className="button button-primary" disabled={busy}>
@@ -10429,7 +10645,7 @@ function TimelineItem({ item }: { item: ActivityItem }) {
       <div>
         <strong>{item.message}</strong>
         <span>
-          {item.type.replaceAll("_", " ")} · {formatDate(item.createdAt)}
+          {activityLabel(item.type)} · {formatDate(item.createdAt)}
         </span>
       </div>
     </div>
@@ -10565,6 +10781,7 @@ function documentTypeLabel(type: string) {
       PERSPECTIVE: "Perspective",
       SIGNED_CONTRACT: "Signed contract",
       PAYMENT_RECEIPT: "Payment receipt or bank confirmation",
+      BALANCE_PAYMENT_RECEIPT: "Balance payment proof",
       DOH_FLOOR_PLAN: "DOH floor plan and device layout",
       LEASE_AND_ADDRESS: "Lease contract and exact site address",
       DTI_REGISTRATION: "DTI registration",
@@ -10575,6 +10792,23 @@ function documentTypeLabel(type: string) {
       FRANCHISE_AGREEMENT: "Signed franchise agreement",
       TRAINING_APPLICATION: "Training application",
       PHARMACY_PERMITS: "Pharmacy licenses and permits",
+    }[type] ?? friendlyFieldLabel(type)
+  );
+}
+function activityLabel(type: string) {
+  return (
+    {
+      DownPaymentSubmittedForFinance: "Down payment submitted for Finance",
+      PaymentConfirmed: "Down payment confirmed",
+      BalancePaymentSubmittedForFinance: "Balance payment submitted for Finance",
+      BalancePaymentConfirmed: "Balance payment confirmed",
+      BalancePaymentReturned: "Balance payment returned",
+      StateChanged: "Workflow state changed",
+      DocumentUploaded: "Document uploaded",
+      DocumentArchived: "Document archived",
+      CallOutcomeRecorded: "Call outcome recorded",
+      NurturingUpdated: "Nurturing updated",
+      PreLaunchUpdated: "Pre-launch updated",
     }[type] ?? friendlyFieldLabel(type)
   );
 }
@@ -10592,6 +10826,12 @@ function statusLabel(status: string) {
       Invoiced: "Invoice generated",
       Submitted: "Awaiting Finance verification",
       Confirmed: "Payment confirmed",
+      AwaitingDownPayment: "Awaiting down payment",
+      DownPaymentOnly: "Down payment only",
+      BalancePending: "Balance payment pending",
+      PartiallyPaid: "Partially paid",
+      PaidInFull: "Paid in full",
+      Returned: "Returned for correction",
       Draft: "Draft in progress",
       InReview: "Under review",
       RevisionRequested: "Changes requested",

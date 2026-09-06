@@ -191,6 +191,7 @@ export interface DocumentItem {
   sizeBytes: number;
   status: string;
   createdAt: string;
+  relatedPaymentId?: string | null;
 }
 export interface Contract {
   leadId: string;
@@ -271,6 +272,69 @@ export interface FinanceWorkbenchResponse {
   confirmedThisMonth: number;
   exceptionCount: number;
 }
+export interface BalancePayment {
+  id: string;
+  leadId: string;
+  amount: number;
+  currency: string;
+  paidAt: string;
+  paymentMethod: string;
+  referenceNumber: string;
+  notes?: string | null;
+  status: string;
+  submittedAt: string;
+  confirmedAt?: string | null;
+  returnReason?: string | null;
+  hasEvidence: boolean;
+  submittedByName?: string | null;
+  confirmedByName?: string | null;
+  acknowledgementReceiptNumber?: string | null;
+  acknowledgementReceiptIssuedAt?: string | null;
+}
+export interface PaymentAccount {
+  leadId: string;
+  leadVersion: number;
+  leadName: string;
+  address?: string | null;
+  productLine?: ProductLine | null;
+  totalAmount: number;
+  currency: string;
+  downPaymentAmount: number;
+  downPaymentStatus: string;
+  downPaymentConfirmedAt?: string | null;
+  acknowledgementReceiptNumber?: string | null;
+  confirmedBalance: number;
+  pendingBalance: number;
+  remainingBalance: number;
+  balancePayments: BalancePayment[];
+}
+export interface PaymentManagementItem {
+  leadId: string;
+  leadName: string;
+  location?: string | null;
+  leadState: LeadState;
+  assignedAgentId: string;
+  ownerName: string;
+  totalAmount: number;
+  downPaymentAmount: number;
+  currency: string;
+  downPaymentStatus: string;
+  confirmedBalance: number;
+  pendingBalance: number;
+  remainingBalance: number;
+  paymentStatus: string;
+  updatedAt: string;
+}
+export interface PaymentManagementResponse {
+  items: PaymentManagementItem[];
+  page: number;
+  pageSize: number;
+  total: number;
+  totalCollected: number;
+  totalOutstanding: number;
+  pendingVerificationCount: number;
+  paidInFullCount: number;
+}
 export interface Notification {
   id: string;
   type: string;
@@ -328,6 +392,10 @@ async function rawRequest<T>(
   headers.set("Accept", "application/json");
   const response = await fetch(`${API_URL}${path}`, {
     ...init,
+    // Workflow state, documents, and role-scoped data must always come from
+    // the API for the active session. A cached GET can otherwise leave the
+    // checklist showing an older account or workflow state.
+    cache: "no-store",
     headers,
     credentials: "include",
   });
@@ -564,8 +632,22 @@ export const api = {
         `/api/v1/leads/${id}/down-payment/confirm`,
         json(payload),
       ),
-    documents: (id: string) =>
-      rawRequest<DocumentItem[]>(`/api/v1/leads/${id}/documents`),
+    acknowledgementReceiptDownload: (id: string) =>
+      rawRequest<{ documentId: string; downloadUrl: string; expiresAt: string }>(
+        `/api/v1/leads/${id}/down-payment/acknowledgement-receipt/download-url`,
+      ),
+    balanceAcknowledgementReceiptDownload: (paymentId: string) =>
+      rawRequest<{ documentId: string; downloadUrl: string; expiresAt: string }>(
+        `/api/v1/leads/payments/balance/${paymentId}/acknowledgement-receipt/download-url`,
+      ),
+    paymentAccount: (id: string) =>
+      rawRequest<PaymentAccount>(`/api/v1/leads/${id}/payments`),
+    createBalancePayment: (id: string, payload: unknown) =>
+      rawRequest<BalancePayment>(`/api/v1/leads/${id}/payments/balance`, json(payload)),
+    confirmBalancePayment: (paymentId: string, payload: unknown = {}) =>
+      rawRequest<BalancePayment>(`/api/v1/leads/payments/balance/${paymentId}/confirm`, json(payload)),
+    returnBalancePayment: (paymentId: string, payload: unknown) =>
+      rawRequest<BalancePayment>(`/api/v1/leads/payments/balance/${paymentId}/return`, json(payload)),
     uploadIntent: (id: string, payload: unknown) =>
       rawRequest<{
         documentId: string;
@@ -575,6 +657,8 @@ export const api = {
         requiredContentType: string;
         maxSizeBytes: number;
       }>(`/api/v1/leads/${id}/documents/upload-intents`, json(payload)),
+    documents: (id: string) =>
+      rawRequest<DocumentItem[]>(`/api/v1/leads/${id}/documents`),
     completeUpload: (id: string, documentId: string, payload: unknown) =>
       rawRequest<unknown>(
         `/api/v1/leads/${id}/documents/${documentId}/complete`,
@@ -707,6 +791,9 @@ export const api = {
     payment: (id: string) =>
       rawRequest<FinancePaymentDetail>(`/api/v1/finance/payments/${id}`),
   },
+  payments: {
+    list: (query = "") => rawRequest<PaymentManagementResponse>(`/api/v1/payments${query}`),
+  },
   reports: {
     overview: (query = "") =>
       rawRequest<unknown>(`/api/v1/reports/overview${query}`),
@@ -732,6 +819,10 @@ export const api = {
         leadId?: string;
         actorId?: string;
         action: string;
+        message?: string;
+        actorName?: string;
+        fromState?: string;
+        toState?: string;
         createdAt: string;
       }>>(
         `/api/v1/audit-logs?page=${page}${leadId ? `&leadId=${encodeURIComponent(leadId)}` : ""}`,
