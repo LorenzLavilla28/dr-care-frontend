@@ -24,7 +24,8 @@ export type LeadState =
   | "ContractSigned"
   | "PreLaunch"
   | "EndorsedToAdmin"
-  | "Acknowledged";
+  | "Acknowledged"
+  | "NotInterested";
 export type ProductLine = "Abc" | "Pharmacy" | "Combo";
 
 export interface UserProfile {
@@ -53,11 +54,14 @@ export interface LoginResponse {
 export interface Lead {
   id: string;
   fullName: string;
+  birthDate?: string | null;
   age?: number;
   contactNumber: string;
   email: string;
   sourceOfIncome: string;
   leadSource: string;
+  notes?: string | null;
+  notInterestedReason?: string | null;
   address?: string;
   industry?: string;
   meetingDateTime?: string;
@@ -80,6 +84,37 @@ export interface Lead {
   locationAnalysisPending: boolean;
   downPaymentSubmittedForFinance?: boolean;
   captureEventId?: string | null;
+  deletionStatus?: "Pending" | "Approved" | "Rejected" | string | null;
+  deletionRequestId?: string | null;
+  deletionRequestedByName?: string | null;
+  deletionRequestedAt?: string | null;
+  deletionReason?: string | null;
+}
+export interface LeadDeletionResponse {
+  leadId: string;
+  requestId: string;
+  status: "Pending" | "Approved" | "Rejected" | string;
+  message: string;
+  at: string;
+}
+export interface LeadDeletionRequest {
+  id: string;
+  leadId: string;
+  leadName: string;
+  leadEmail: string;
+  assignedAgentId: string;
+  assignedAgentName?: string | null;
+  leadState: LeadState;
+  leadVersion: number;
+  requestedById: string;
+  requestedByName?: string | null;
+  reason: string;
+  status: "Pending" | "Approved" | "Rejected" | string;
+  requestedAt: string;
+  reviewedById?: string | null;
+  reviewedByName?: string | null;
+  reviewReason?: string | null;
+  reviewedAt?: string | null;
 }
 export interface LeadPage {
   items: Lead[];
@@ -192,6 +227,7 @@ export interface DocumentItem {
   status: string;
   createdAt: string;
   relatedPaymentId?: string | null;
+  downloadKind?: string | null;
 }
 export interface Contract {
   leadId: string;
@@ -200,6 +236,8 @@ export interface Contract {
   templateCode: string;
   version: string;
   updatedAt: string;
+  signingMethod?: "Electronic" | "Manual" | string;
+  manualSignedAt?: string;
   gmApproved?: boolean;
   franchiseeSignerName?: string;
   franchiseeSignedAt?: string;
@@ -561,6 +599,8 @@ export const api = {
       rawRequest<Lead>(`/api/v1/leads/${id}`, patch(payload)),
     startInquiry: (id: string) =>
       rawRequest<Lead>(`/api/v1/leads/${id}/inquiry/start`, json({})),
+    moveBack: (id: string, payload: { reason: string; expectedVersion?: number }) =>
+      rawRequest<Lead>(`/api/v1/leads/${id}/move-back`, json(payload)),
     getInquiry: (id: string) => rawRequest<Lead>(`/api/v1/leads/${id}/inquiry`),
     updateInquiry: (id: string, payload: unknown) =>
       rawRequest<Lead>(`/api/v1/leads/${id}/inquiry`, patch(payload)),
@@ -579,6 +619,14 @@ export const api = {
       rawRequest<unknown>(`/api/v1/leads/${id}/qualification`, json(payload)),
     assign: (id: string, payload: unknown) =>
       rawRequest<Lead>(`/api/v1/leads/${id}/assign`, json(payload)),
+    requestDeletion: (id: string, payload: { reason: string; expectedVersion?: number }) =>
+      rawRequest<LeadDeletionResponse>(`/api/v1/leads/${id}/deletion-request`, json(payload)),
+    approveDeletion: (id: string) =>
+      rawRequest<LeadDeletionResponse>(`/api/v1/leads/${id}/deletion/approve`, json({})),
+    rejectDeletion: (id: string, payload: { reason: string }) =>
+      rawRequest<LeadDeletionResponse>(`/api/v1/leads/${id}/deletion/reject`, json(payload)),
+    deletionRequests: (status = "Pending") =>
+      rawRequest<LeadDeletionRequest[]>(`/api/v1/leads/deletion-requests?status=${encodeURIComponent(status)}`),
     activities: (id: string, page = 1) =>
       rawRequest<PagedResponse<Activity>>(
         `/api/v1/leads/${id}/activities?page=${page}`,
@@ -682,6 +730,11 @@ export const api = {
       ),
     updateContract: (id: string, payload: unknown) =>
       rawRequest<Contract>(`/api/v1/leads/${id}/contract`, patch(payload)),
+    selectContractSigningMethod: (id: string, payload: unknown) =>
+      rawRequest<Contract>(
+        `/api/v1/leads/${id}/contract/signing-method`,
+        json(payload),
+      ),
     submitContractReview: (id: string, payload: unknown) =>
       rawRequest<Contract>(
         `/api/v1/leads/${id}/contract/submit-review`,
@@ -730,10 +783,12 @@ export const api = {
       id: string,
       nurseOrDoctorAvailable = false,
       confirmSignedContractReview = false,
+      confirmManualSigning = false,
+      expectedVersion?: number,
     ) =>
       rawRequest<unknown>(
         `/api/v1/leads/${id}/pre-launch/initialize`,
-        json({ nurseOrDoctorAvailable, confirmSignedContractReview }),
+        json({ nurseOrDoctorAvailable, confirmSignedContractReview, confirmManualSigning, expectedVersion }),
       ),
     updatePreLaunchItem: (id: string, itemId: string, payload: unknown) =>
       rawRequest<unknown>(

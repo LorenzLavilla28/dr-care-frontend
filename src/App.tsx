@@ -1,11 +1,12 @@
 import {
   useEffect,
+  useId,
   useRef,
   useState,
   type ComponentType,
-  type ChangeEvent,
   type FormEvent,
   type PointerEvent as ReactPointerEvent,
+  type RefObject,
   type ReactNode,
 } from "react";
 import { NavLink, Navigate, Route, Routes, useNavigate, useParams } from "react-router-dom";
@@ -25,6 +26,7 @@ import {
   CircleHelp,
   ClipboardCheck,
   Copy,
+  CornerUpLeft,
   Crown,
   Clock3,
   Eraser,
@@ -45,6 +47,7 @@ import {
   Settings,
   ShieldCheck,
   Sparkles,
+  Trash2,
   Upload,
   UsersRound,
   UserRound,
@@ -70,6 +73,7 @@ import {
   type PaymentManagementItem,
   type PaymentManagementResponse,
   type Lead,
+  type LeadDeletionRequest,
   type LeadState,
   type LocationAnalysisAnswer,
   type LocationAnalysisQuestion,
@@ -88,14 +92,249 @@ import {
   startRealtime,
   stopRealtime,
   subscribeRealtime,
+  type RealtimeEvent,
 } from "./realtime";
 
 type Icon = ComponentType<{ size?: number; strokeWidth?: number }>;
 type Notice = { message: string; tone?: "success" | "error" };
+type BrandedSelectOption = { value: string; label: ReactNode; disabled?: boolean };
+type BrandedSelectPlacement = "auto" | "down" | "up";
 
-function useRealtimeRefresh() {
+function getDropdownBoundary(element: HTMLElement) {
+  let current = element.parentElement;
+  let top = 0;
+  let bottom = window.innerHeight;
+
+  while (current && current !== document.body) {
+    const styles = window.getComputedStyle(current);
+    if (/(auto|scroll|overlay|hidden|clip)/.test(`${styles.overflow} ${styles.overflowY}`)) {
+      const rect = current.getBoundingClientRect();
+      top = Math.max(top, rect.top);
+      bottom = Math.min(bottom, rect.bottom);
+    }
+    current = current.parentElement;
+  }
+
+  return { top, bottom };
+}
+
+function BrandedSelect({
+  value,
+  options,
+  onChange,
+  placeholder,
+  menuPlacement = "auto",
+  disabled = false,
+  required = false,
+  invalid = false,
+  className,
+  ariaLabel,
+}: {
+  value: string;
+  options: readonly BrandedSelectOption[];
+  onChange: (value: string) => void;
+  placeholder?: string;
+  menuPlacement?: BrandedSelectPlacement;
+  disabled?: boolean;
+  required?: boolean;
+  invalid?: boolean;
+  className?: string;
+  ariaLabel?: string;
+}) {
+  const selectId = useId().replaceAll(":", "");
+  const rootRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const [open, setOpen] = useState(false);
+  const [resolvedPlacement, setResolvedPlacement] = useState<Exclude<BrandedSelectPlacement, "auto">>(
+    menuPlacement === "up" ? "up" : "down",
+  );
+  const selectedIndex = options.findIndex((option) => option.value === value);
+  const firstEnabledIndex = options.findIndex((option) => !option.disabled);
+  const [activeIndex, setActiveIndex] = useState(
+    selectedIndex >= 0 ? selectedIndex : Math.max(firstEnabledIndex, 0),
+  );
+  const selectedOption = selectedIndex >= 0 ? options[selectedIndex] : undefined;
+  const activeOptionId = `${selectId}-option-${Math.max(activeIndex, 0)}`;
+
+  useEffect(() => {
+    if (!open || menuPlacement !== "auto") {
+      setResolvedPlacement(menuPlacement === "up" ? "up" : "down");
+      return;
+    }
+
+    const updatePlacement = () => {
+      const trigger = triggerRef.current;
+      const menu = menuRef.current;
+      if (!trigger || !menu) return;
+
+      const triggerRect = trigger.getBoundingClientRect();
+      const boundary = getDropdownBoundary(trigger);
+      const menuStyles = window.getComputedStyle(menu);
+      const maxHeight = Number.parseFloat(menuStyles.maxHeight);
+      const menuHeight = Math.min(
+        menu.scrollHeight,
+        Number.isFinite(maxHeight) ? maxHeight : menu.scrollHeight,
+      );
+      const gap = 5;
+      const spaceAbove = Math.max(0, triggerRect.top - boundary.top - gap);
+      const spaceBelow = Math.max(0, boundary.bottom - triggerRect.bottom - gap);
+      const fitsAbove = spaceAbove >= menuHeight;
+      const fitsBelow = spaceBelow >= menuHeight;
+      const nextPlacement = fitsBelow || (!fitsAbove && spaceBelow >= spaceAbove) ? "down" : "up";
+
+      setResolvedPlacement((current) => current === nextPlacement ? current : nextPlacement);
+    };
+
+    updatePlacement();
+    window.addEventListener("resize", updatePlacement);
+    window.addEventListener("scroll", updatePlacement, true);
+    return () => {
+      window.removeEventListener("resize", updatePlacement);
+      window.removeEventListener("scroll", updatePlacement, true);
+    };
+  }, [open, menuPlacement, options.length]);
+
+  useEffect(() => {
+    if (!open) return;
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    document.addEventListener("pointerdown", closeOnOutsidePointer);
+    return () => document.removeEventListener("pointerdown", closeOnOutsidePointer);
+  }, [open]);
+
+  useEffect(() => {
+    if (selectedIndex >= 0 && !options[selectedIndex]?.disabled) setActiveIndex(selectedIndex);
+  }, [selectedIndex]);
+
+  const moveActive = (direction: 1 | -1) => {
+    if (!options.length) return;
+    let next = activeIndex;
+    for (let step = 0; step < options.length; step += 1) {
+      next = (next + direction + options.length) % options.length;
+      if (!options[next]?.disabled) {
+        setActiveIndex(next);
+        return;
+      }
+    }
+  };
+
+  const choose = (index: number) => {
+    const option = options[index];
+    if (!option || option.disabled) return;
+    setActiveIndex(index);
+    setOpen(false);
+    onChange(option.value);
+    requestAnimationFrame(() => triggerRef.current?.focus());
+  };
+
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>) => {
+    if (disabled) return;
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      if (!open) {
+        setActiveIndex(selectedIndex >= 0 ? selectedIndex : Math.max(firstEnabledIndex, 0));
+        setOpen(true);
+      } else {
+        moveActive(event.key === "ArrowDown" ? 1 : -1);
+      }
+      return;
+    }
+    if (event.key === "Home" || event.key === "End") {
+      event.preventDefault();
+      let index = options.findIndex((option) => !option.disabled);
+      if (event.key === "End") {
+        index = -1;
+        for (let optionIndex = options.length - 1; optionIndex >= 0; optionIndex -= 1) {
+          if (!options[optionIndex]?.disabled) {
+            index = optionIndex;
+            break;
+          }
+        }
+      }
+      if (index >= 0) setActiveIndex(index);
+      return;
+    }
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      if (!open) setOpen(true);
+      else choose(activeIndex);
+      return;
+    }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      setOpen(false);
+    }
+  };
+
+  return (
+    <div className={`branded-select ${open ? "is-open" : ""} ${className ?? ""}`} ref={rootRef}>
+      <button
+        type="button"
+        ref={triggerRef}
+        className={`branded-select-trigger ${invalid ? "field-missing" : ""}`}
+        disabled={disabled}
+        aria-label={ariaLabel}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-controls={`${selectId}-listbox`}
+        aria-activedescendant={open ? activeOptionId : undefined}
+        aria-invalid={invalid}
+        aria-required={required}
+        onClick={() => {
+          if (!disabled) {
+            setActiveIndex(selectedIndex >= 0 ? selectedIndex : Math.max(firstEnabledIndex, 0));
+            setOpen((current) => !current);
+          }
+        }}
+        onKeyDown={handleKeyDown}
+      >
+        <span className={selectedOption ? "" : "branded-select-placeholder"}>
+          {selectedOption?.label ?? placeholder ?? "Select an option"}
+        </span>
+        <ChevronDown size={16} aria-hidden="true" />
+      </button>
+      {open && (
+        <div ref={menuRef} className={`branded-select-menu ${resolvedPlacement === "up" ? "branded-select-menu-up" : ""}`} id={`${selectId}-listbox`} role="listbox" aria-label={ariaLabel}>
+          {options.map((option, index) => (
+            <div
+              className={`branded-select-option ${index === activeIndex ? "active" : ""} ${option.value === value ? "selected" : ""}`}
+              id={`${selectId}-option-${index}`}
+              key={`${option.value}-${index}`}
+              role="option"
+              aria-selected={option.value === value}
+              aria-disabled={option.disabled}
+              onMouseDown={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+              }}
+              onMouseEnter={() => !option.disabled && setActiveIndex(index)}
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                choose(index);
+              }}
+            >
+              {option.label}
+            </div>
+          ))}
+        </div>
+      )}
+      {required && <input className="branded-select-validation" tabIndex={-1} aria-hidden="true" value={value} onChange={() => undefined} required />}
+    </div>
+  );
+}
+
+function useRealtimeRefresh(shouldRefresh: (event: RealtimeEvent) => boolean = () => true) {
   const [revision, setRevision] = useState(0);
-  useEffect(() => subscribeRealtime(() => setRevision((value) => value + 1)), []);
+  const shouldRefreshRef = useRef(shouldRefresh);
+  useEffect(() => {
+    shouldRefreshRef.current = shouldRefresh;
+  }, [shouldRefresh]);
+  useEffect(() => subscribeRealtime((event) => {
+    if (shouldRefreshRef.current(event)) setRevision((value) => value + 1);
+  }), []);
   return revision;
 }
 
@@ -114,6 +353,7 @@ const states: { label: string; value: LeadState; tone: string }[] = [
   { label: "Pre-launch", value: "PreLaunch", tone: "teal" },
   { label: "Endorsed", value: "EndorsedToAdmin", tone: "red" },
   { label: "Acknowledged", value: "Acknowledged", tone: "green" },
+  { label: "Not interested", value: "NotInterested", tone: "slate" },
 ];
 
 const pipelineStages: {
@@ -211,11 +451,52 @@ function pipelineStageForLead(lead: Lead, submittedForFinance = false) {
 function pipelineStageLabel(state: LeadState, submittedForFinance = false) {
   return pipelineStageForLead({ state } as Lead, submittedForFinance).label;
 }
+
+function moveBackTargetForLead(lead: Lead) {
+  if (lead.state === "DownPaymentPending" && lead.downPaymentSubmittedForFinance)
+    return null;
+  switch (lead.state) {
+    case "Inquiry":
+    case "InquiryIncomplete":
+      return { state: "New" as LeadState, label: "New" };
+    case "Nurturing":
+    case "FollowUp":
+      return { state: "Inquiry" as LeadState, label: "Inquiry" };
+    case "Qualified":
+    case "DownPaymentPending":
+      return { state: "Nurturing" as LeadState, label: "Qualification" };
+    default:
+      return null;
+  }
+}
+
+function moveBackUnavailableReasonForLead(lead: Lead) {
+  if (lead.state === "DownPaymentPending" && lead.downPaymentSubmittedForFinance)
+    return "The payment package is with Finance. Resolve that package before moving the lead back.";
+  if (lead.state === "DownPaymentConfirmed")
+    return "The down payment is confirmed. A financial reversal is required before this lead can move back.";
+  if (["ContractDrafting", "ContractReview", "ContractSigned"].includes(lead.state))
+    return "Use the contract revision workflow for contract-stage changes. Signed contracts cannot be rolled back here.";
+  if (["PreLaunch", "EndorsedToAdmin", "Acknowledged"].includes(lead.state))
+    return "This lead has reached a launch or handoff milestone. Use the existing revision or return process.";
+  return null;
+}
+
 function ageInDays(value: string) {
   const timestamp = Date.parse(value);
   return Number.isNaN(timestamp)
     ? 0
     : Math.max(0, Math.floor((Date.now() - timestamp) / 86400000));
+}
+function calculatedAgeFromBirthDate(value: string) {
+  if (!value) return null;
+  const birthDate = new Date(`${value}T00:00:00`);
+  if (Number.isNaN(birthDate.getTime())) return null;
+  const today = new Date();
+  let age = today.getFullYear() - birthDate.getFullYear();
+  const birthdayThisYear = new Date(today.getFullYear(), birthDate.getMonth(), birthDate.getDate());
+  if (birthdayThisYear > today) age -= 1;
+  return age;
 }
 function relativeAge(value: string) {
   const days = ageInDays(value);
@@ -225,7 +506,7 @@ function formatDateTime(value: string) {
   return new Intl.DateTimeFormat("en-PH", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" }).format(new Date(value));
 }
 function isOverdueLead(lead: Lead) {
-  if (lead.state === "Acknowledged") return false;
+  if (lead.state === "Acknowledged" || lead.state === "NotInterested") return false;
   return lead.state === "FollowUp" || ageInDays(lead.updatedAt) >= 7;
 }
 function isAttentionLead(lead: Lead) {
@@ -322,22 +603,21 @@ function SourceOfIncomeField({
       <span>
         Source of income{required ? <span className="required-mark"> *</span> : <span className="field-optional"> (optional)</span>}
       </span>
-      <select
+      <BrandedSelect
         value={choice}
         required={required}
-        aria-invalid={invalid}
         className={invalid ? "field-missing" : undefined}
-        onChange={(event) => {
-          const next = event.target.value;
+        ariaLabel="Source of income"
+        placeholder="Select source of income"
+        options={[
+          { value: "", label: "Select source of income" },
+          ...sourceOfIncomeOptions.map((option) => ({ value: option, label: option })),
+        ]}
+        onChange={(next) => {
           setChoice(next);
           onChange(next === "Others" ? "" : next);
         }}
-      >
-        <option value="">Select source of income</option>
-        {sourceOfIncomeOptions.map((option) => (
-          <option key={option}>{option}</option>
-        ))}
-      </select>
+      />
       {choice === "Others" ? (
         <input
           value={value}
@@ -386,22 +666,21 @@ function IndustryField({
       <span>
         Industry{required ? <span className="required-mark"> *</span> : null}
       </span>
-      <select
+      <BrandedSelect
         value={choice}
         required={required}
-        aria-invalid={invalid}
         className={invalid ? "field-missing" : undefined}
-        onChange={(event) => {
-          const next = event.target.value;
+        ariaLabel="Industry"
+        placeholder="Select industry"
+        options={[
+          { value: "", label: "Select industry" },
+          ...industryOptions.map((option) => ({ value: option, label: option })),
+        ]}
+        onChange={(next) => {
           setChoice(next);
           onChange(next === "Others" ? "" : next);
         }}
-      >
-        <option value="">Select industry</option>
-        {industryOptions.map((option) => (
-          <option key={option}>{option}</option>
-        ))}
-      </select>
+      />
       {choice === "Others" ? (
         <input
           value={value}
@@ -507,6 +786,12 @@ const leaseOwnershipOptions = [
   ["PENDING", "Pending confirmation"],
   ["DONT_KNOW", "Don't know"],
 ] as const;
+const locationSupportingDocumentTypes: [string, string][] = [
+  ["SITE_PHOTOS", "Site photos"],
+  ["LEASE_AND_ADDRESS", "Lease and address"],
+  ["FLOOR_PLAN", "Floor plan"],
+  ["PERSPECTIVE", "Perspective"],
+];
 
 const lifecycleSteps = [
   { label: "Inquiry", tab: "Inquiry" },
@@ -649,6 +934,13 @@ function nextStepForLead(lead: Lead, submittedForFinance = false): NextStep {
           "The Admin Team has acknowledged ownership. Downstream onboarding can continue.",
         tab: "Workflow",
       };
+    case "NotInterested":
+      return {
+        label: "Not interested",
+        detail:
+          "This lead is closed as not interested and is available in the Not interested view for reference.",
+        tab: "Overview",
+      };
   }
 }
 
@@ -718,7 +1010,7 @@ const nav: { label: string; to: string; icon: Icon; roles?: Role[] }[] = [
     label: "My work queue",
     to: "/tasks",
     icon: ListChecks,
-    roles: ["SalesAgent", "GeneralManager", "Leadership"],
+    roles: ["SalesAgent", "GeneralManager", "Finance", "AdminTeam", "Leadership"],
   },
   {
     label: "Finance",
@@ -789,6 +1081,8 @@ const pipelineReadRoles: Role[] = [
 const taskReadRoles: Role[] = [
   "SalesAgent",
   "GeneralManager",
+  "Finance",
+  "AdminTeam",
   "Leadership",
 ];
 const leadWriteRoles: Role[] = [
@@ -1084,7 +1378,7 @@ function PublicEventPage({ token }: { token: string }) {
       <div className="public-event-heading"><div><h1>{event.name}</h1><p>{event.description || "Tell us a little about yourself and the location you have in mind."}</p></div><span className={`public-event-status ${event.isOpen ? "open" : "closed"}`}>{event.isOpen ? "Prospect intake open" : "Prospect intake closed"}</span></div>
       {!event.isOpen ? <div className="public-event-closed"><Clock3 size={20} /><div><strong>{new Date(event.startsAt).getTime() > Date.now() ? "Prospect intake opens soon" : "This event has ended"}</strong><span>{new Date(event.startsAt).getTime() > Date.now() ? `Prospect intake opens ${formatDateTime(event.startsAt)}.` : "Prospect intake is no longer available through this QR code."}</span></div></div> : <form className="public-event-form" onSubmit={submit} noValidate>
         <div className="public-event-section"><span className="eyebrow">YOUR DETAILS</span><div className="form-grid"><label><span>Full name <b>*</b></span><input required minLength={2} maxLength={160} value={form.fullName} onChange={(e) => setForm({ ...form, fullName: e.target.value })} /></label><label><span>Contact number <b>*</b></span><input required type="tel" maxLength={40} value={form.contactNumber} aria-invalid={attempted && (contactNumberMissing || invalidContactNumber)} className={attempted && (contactNumberMissing || invalidContactNumber) ? "field-missing" : undefined} onChange={(e) => setForm({ ...form, contactNumber: e.target.value })} /></label><label><span>Email <b>*</b></span><input required type="email" maxLength={254} value={form.email} aria-invalid={attempted && (emailMissing || invalidEmail)} className={attempted && (emailMissing || invalidEmail) ? "field-missing" : undefined} onChange={(e) => setForm({ ...form, email: e.target.value })} /></label><label><span>Franchisee address <b>*</b></span><input required minLength={5} maxLength={500} placeholder="Home or registered business address" value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} /><small className="field-hint">Used on the franchise agreement and official records.</small></label></div></div>
-        <div className="public-event-section"><span className="eyebrow">YOUR OPPORTUNITY</span><div className="form-grid"><label className="form-wide"><span>Sales Agent <span className="field-optional">(optional)</span></span><select value={form.assistedByUserId} onChange={(e) => setForm({ ...form, assistedByUserId: e.target.value })}><option value="">No Sales Agent selected</option>{(event.staffOptions ?? []).map((staff) => <option key={staff.id} value={staff.id}>{staff.name}</option>)}</select><small className="field-hint">Select the Sales Agent who assisted you.</small></label><label className="form-wide"><span>Proposed franchise location <span className="field-optional">(optional)</span></span><input maxLength={240} placeholder="Street, barangay, city, province" value={form.preferredLocation} onChange={(e) => setForm({ ...form, preferredLocation: e.target.value })} /></label><SourceOfIncomeField value={form.sourceOfIncome} onChange={(value) => setForm({ ...form, sourceOfIncome: value })} /><label><span>Lead source</span><input value="Event prospect capture" disabled /></label><label><span>Product line <span className="field-optional">(optional)</span></span><select value={form.productLine} onChange={(e) => setForm({ ...form, productLine: e.target.value })}><option value="">Choose later</option><option value="Abc">ABC Animal Bite Clinic</option><option value="Pharmacy">Pharmacy</option><option value="Combo">ABC + Pharmacy Combo</option></select></label></div></div>
+        <div className="public-event-section"><span className="eyebrow">YOUR OPPORTUNITY</span><div className="form-grid"><label className="form-wide"><span>Sales Agent <span className="field-optional">(optional)</span></span><BrandedSelect value={form.assistedByUserId} onChange={(value) => setForm({ ...form, assistedByUserId: value })} ariaLabel="Sales Agent" options={[{ value: "", label: "No Sales Agent selected" }, ...(event.staffOptions ?? []).map((staff) => ({ value: staff.id, label: staff.name }))]} /><small className="field-hint">Select the Sales Agent who assisted you.</small></label><label className="form-wide"><span>Proposed franchise location <span className="field-optional">(optional)</span></span><input maxLength={240} placeholder="Street, barangay, city, province" value={form.preferredLocation} onChange={(e) => setForm({ ...form, preferredLocation: e.target.value })} /></label><SourceOfIncomeField value={form.sourceOfIncome} onChange={(value) => setForm({ ...form, sourceOfIncome: value })} /><label><span>Lead source</span><input value="Event prospect capture" disabled /></label><label><span>Product line <span className="field-optional">(optional)</span></span><BrandedSelect value={form.productLine} onChange={(value) => setForm({ ...form, productLine: value })} ariaLabel="Product line" options={[{ value: "", label: "Choose later" }, { value: "Abc", label: "ABC Animal Bite Clinic" }, { value: "Pharmacy", label: "Pharmacy" }, { value: "Combo", label: "ABC + Pharmacy Combo" }]} /></label></div></div>
         <label className="public-event-consent"><input type="checkbox" required checked={form.consentAccepted} onChange={(e) => setForm({ ...form, consentAccepted: e.target.checked })} /><span>I agree that Dr. Care may use these details to contact me about this franchise opportunity. <b>*</b></span></label>
         {attempted && missing.length > 0 && <div className="form-error" role="alert">Please complete: {missing.join(", ")}.</div>}
         {error && <div className="form-error" role="alert">{error}</div>}
@@ -1404,12 +1698,39 @@ function Shell({
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [switchingRole, setSwitchingRole] = useState(false);
+  const [pendingWorkCount, setPendingWorkCount] = useState(0);
+  const realtimeRevision = useRealtimeRefresh((event) => event.eventType !== "DocumentUpdated" && event.eventType !== "PreLaunchUpdated");
   useEffect(() => {
     void startRealtime().catch(() => undefined);
     return () => {
       void stopRealtime();
     };
   }, []);
+  useEffect(() => {
+    let active = true;
+    const deletionRequests = hasRole(user.role, ["GeneralManager"])
+      ? api.leads.deletionRequests().catch(() => [] as LeadDeletionRequest[])
+      : Promise.resolve([] as LeadDeletionRequest[]);
+    Promise.all([
+      api.tasks.list(),
+      api.leads.listAll("?limit=100&sort=updatedAt"),
+      deletionRequests,
+    ])
+      .then(([tasks, leadPage, requests]) => {
+        const openTasks = tasks.filter((task) => task.status === "Open");
+        const persistedLeadIds = new Set(openTasks.map((task) => task.leadId));
+        const workflowCount = leadPage.items.filter(
+          (lead) => isMyCurrentAction(lead, user) && !persistedLeadIds.has(lead.id),
+        ).length;
+        if (active) setPendingWorkCount(openTasks.length + workflowCount + requests.length);
+      })
+      .catch(() => {
+        // Keep the last known count if the navigation refresh is temporarily unavailable.
+      });
+    return () => {
+      active = false;
+    };
+  }, [user.id, user.role, realtimeRevision]);
   useEffect(() => {
     if (!mobileOpen) return;
     const closeOnEscape = (event: KeyboardEvent) => {
@@ -1423,8 +1744,8 @@ function Shell({
       window.removeEventListener("keydown", closeOnEscape);
     };
   }, [mobileOpen]);
-  const switchRole = async (event: ChangeEvent<HTMLSelectElement>) => {
-    const nextRole = event.target.value as Role;
+  const switchRole = async (nextRoleValue: string) => {
+    const nextRole = nextRoleValue as Role;
     if (!nextRole || nextRole === user.role) return;
     setSwitchingRole(true);
     try {
@@ -1433,7 +1754,7 @@ function Shell({
       onUserChanged(response.user);
       navigate("/", { replace: true });
     } catch {
-      event.target.value = user.role;
+      // The controlled value remains on the current role when switching fails.
     } finally {
       setSwitchingRole(false);
     }
@@ -1486,6 +1807,14 @@ function Shell({
                 >
                   <IconComponent size={19} />
                   <span>{item.label}</span>
+                  {item.to === "/tasks" && pendingWorkCount > 0 && (
+                    <span
+                      className="nav-badge"
+                      aria-label={`${pendingWorkCount} pending to-do item${pendingWorkCount === 1 ? "" : "s"}`}
+                    >
+                      {pendingWorkCount}
+                    </span>
+                  )}
                 </NavLink>
               );
             })}
@@ -1506,9 +1835,14 @@ function Shell({
           {(user.roles?.length ?? 0) > 1 && (
             <label className="sidebar-role-switch">
               <span>Acting as</span>
-              <select value={user.role} onChange={switchRole} disabled={switchingRole} aria-label="Switch active role">
-                {(user.roles ?? [user.role]).map((role) => <option key={role} value={role}>{roleLabel(role)}</option>)}
-              </select>
+              <BrandedSelect
+                value={user.role}
+                onChange={switchRole}
+                disabled={switchingRole}
+                menuPlacement="up"
+                ariaLabel="Switch active role"
+                options={(user.roles ?? [user.role]).map((role) => ({ value: role, label: roleLabel(role) }))}
+              />
             </label>
           )}
         </div>
@@ -1797,32 +2131,42 @@ function PipelineContent({
   const [loading, setLoading] = useState(true);
   const [createOpen, setCreateOpen] = useState(false);
   const [view, setView] = useState<"board" | "table">("board");
+  const [leadView, setLeadView] = useState<"active" | "notInterested">("active");
   const [notice, setNotice] = useState<Notice | null>(null);
   const [filter, setFilter] = useState<PipelineFilter>("all");
   const [filtersOpen, setFiltersOpen] = useState(true);
   const boardRef = useRef<HTMLDivElement>(null);
   const canManageLeads = hasRole(user.role, leadWriteRoles);
   useEffect(() => {
+    let active = true;
     const query =
       new URLSearchParams(window.location.search).get("search") ?? "";
     setSearch(query);
-    api.leads
-      .listAll("?sort=updatedAt")
-      .then((result) => setLeads(result.items))
+    setLoading(true);
+    const leadQuery = leadView === "notInterested"
+      ? "?state=NotInterested&sort=updatedAt"
+      : "?sort=updatedAt";
+    api.leads.listAll(leadQuery)
+      .then((result) => {
+        if (!active) return;
+        setLeads(result.items);
+      })
       .catch((e) =>
-        setNotice({
+        active && setNotice({
           message: errorMessage(e, "Unable to load the pipeline."),
           tone: "error",
         }),
       )
-      .finally(() => setLoading(false));
-  }, [realtimeRevision]);
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [leadView, realtimeRevision]);
   const filtered = leads.filter((lead) => {
     const matchesSearch =
-      `${lead.fullName} ${lead.email} ${lead.preferredLocation ?? ""} ${lead.productLine ?? ""}`
+      `${lead.fullName} ${lead.email} ${lead.preferredLocation ?? ""} ${lead.productLine ?? ""} ${lead.notInterestedReason ?? ""}`
         .toLowerCase()
         .includes(search.toLowerCase());
     const matchesFilter =
+      leadView === "notInterested" ||
       filter === "all" ||
       (filter === "mine" && isMyOpportunity(lead, user)) ||
       (filter === "attention" && isAttentionLead(lead)) ||
@@ -1830,10 +2174,17 @@ function PipelineContent({
     return matchesSearch && matchesFilter;
   });
   const addLead = async (payload: unknown) => {
-    const lead = await api.leads.create(payload);
-    setLeads((items) => [lead, ...items]);
-    setCreateOpen(false);
-    setNotice({ message: "Lead added to the pipeline.", tone: "success" });
+    try {
+      const lead = await api.leads.create(payload);
+      setLeads((items) => [lead, ...items]);
+      setCreateOpen(false);
+      setNotice({ message: "Lead added to the pipeline.", tone: "success" });
+    } catch (e) {
+      setNotice({
+        message: errorMessage(e, "Unable to add the lead. Please review the form and try again."),
+        tone: "error",
+      });
+    }
   };
   const filteredLeadKey = filtered.map((lead) => lead.id).join(",");
   useEffect(() => {
@@ -1898,7 +2249,7 @@ function PipelineContent({
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search this pipeline"
+              placeholder={leadView === "notInterested" ? "Search not interested leads" : "Search this pipeline"}
             />
           </div>
           <button
@@ -1906,13 +2257,32 @@ function PipelineContent({
             type="button"
             onClick={() => setFiltersOpen((value) => !value)}
             aria-expanded={filtersOpen}
+            disabled={leadView === "notInterested"}
           >
             <Filter size={16} /> Filters
           </button>
           <div
             className="view-segmented"
             role="group"
-            aria-label="Pipeline view"
+            aria-label="Lead outcome view"
+          >
+            <button
+              className={`view-toggle ${leadView === "active" ? "active" : ""}`}
+              onClick={() => { setLeadView("active"); setFilter("all"); }}
+            >
+              Active pipeline
+            </button>
+            <button
+              className={`view-toggle ${leadView === "notInterested" ? "active" : ""}`}
+              onClick={() => { setLeadView("notInterested"); setFilter("all"); setView("table"); }}
+            >
+              Not interested
+            </button>
+          </div>
+          <div
+            className="view-segmented"
+            role="group"
+            aria-label="Pipeline layout"
           >
             <button
               className={`view-toggle ${view === "board" ? "active" : ""}`}
@@ -1928,7 +2298,7 @@ function PipelineContent({
             </button>
           </div>
         </div>
-        {filtersOpen && (
+        {filtersOpen && leadView === "active" && (
           <div className="quick-filter-row" aria-label="Quick pipeline filters">
             {sharedFilterOptions.map((option) => (
               <button
@@ -1946,6 +2316,8 @@ function PipelineContent({
       </div>
       {loading ? (
         <Loading />
+      ) : leadView === "notInterested" ? (
+        <NotInterestedList leads={filtered} />
       ) : view === "board" ? (
         <div
           className="kanban-board"
@@ -2042,6 +2414,53 @@ function PipelineContent({
   );
 }
 
+function NotInterestedList({ leads }: { leads: Lead[] }) {
+  return (
+    <section className="panel not-interested-panel">
+      <div className="not-interested-header">
+        <div>
+          <span className="eyebrow">CLOSED OUTCOMES</span>
+          <h3>Not interested leads</h3>
+          <p>
+            These records are kept for context and audit history, but are not part of the active Kanban.
+          </p>
+        </div>
+        <Archive size={22} />
+      </div>
+      {leads.length === 0 ? (
+        <EmptyState
+          icon={Archive}
+          title="No not interested leads found"
+          text="Marked-not-interested leads will appear here with their reason and owner."
+        />
+      ) : (
+        <div className="not-interested-list">
+          {leads.map((lead) => (
+            <NavLink
+              to={`/leads/${lead.id}`}
+              className="not-interested-row"
+              key={lead.id}
+            >
+              <span className="avatar avatar-small">{initials(lead.fullName)}</span>
+              <span className="not-interested-main">
+                <strong>{lead.fullName}</strong>
+                <small>
+                  {lead.assignedAgentName ?? "Unassigned"} · Updated {formatDateTime(lead.updatedAt)}
+                </small>
+              </span>
+              <span className="not-interested-reason">
+                <StatusPill state="NotInterested" />
+                <span>{lead.notInterestedReason ?? "No reason recorded."}</span>
+              </span>
+              <ChevronRight size={17} />
+            </NavLink>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
 function LeadDetail() {
   if (!hasRole(session.user?.role, leadReadRoles))
     return <Navigate to="/" replace />;
@@ -2050,7 +2469,11 @@ function LeadDetail() {
 
 function LeadDetailContent() {
   const { leadId = "" } = useParams();
-  const realtimeRevision = useRealtimeRefresh();
+  const navigate = useNavigate();
+  const realtimeRevision = useRealtimeRefresh((event) => {
+    const currentLeadId = leadId.toLowerCase();
+    return event.leadId?.toLowerCase() === currentLeadId && !["DocumentUpdated", "PreLaunchUpdated"].includes(event.eventType);
+  });
   const [lead, setLead] = useState<Lead | null>(null);
   const [activities, setActivities] = useState<ActivityItem[]>([]);
   const [activityPage, setActivityPage] = useState(1);
@@ -2091,6 +2514,10 @@ function LeadDetailContent() {
     { id: string; displayName: string; role: Role; roles?: Role[]; isActive: boolean }[]
   >([]);
   const [notice, setNotice] = useState<Notice | null>(null);
+  const [deletionDialog, setDeletionDialog] = useState<"request" | "approve" | "reject" | null>(null);
+  const [deletionBusy, setDeletionBusy] = useState(false);
+  const [moveBackOpen, setMoveBackOpen] = useState(false);
+  const [moveBackBusy, setMoveBackBusy] = useState(false);
   const loadActivities = async (page = 1) => {
     try {
       const response = await api.leads.activities(leadId, page);
@@ -2179,6 +2606,13 @@ function LeadDetailContent() {
   const openTasks = tasks.filter((task) => task.status === "Open");
   const nurturing = lead.state === "Nurturing" || lead.state === "FollowUp";
   const canEditLead = hasRole(session.user?.role, leadWriteRoles);
+  const deletionPending = lead.deletionStatus === "Pending";
+  const moveBackTarget = moveBackTargetForLead(lead);
+  const moveBackUnavailableReason = moveBackUnavailableReasonForLead(lead);
+  const canSeeMoveBack = canEditLead && !deletionPending && !["New", "NotInterested"].includes(lead.state);
+  const canMoveBack = canEditLead && Boolean(moveBackTarget) && !deletionPending;
+  const canRequestDeletion = hasRole(session.user?.role, leadWriteRoles) && !deletionPending;
+  const canReviewDeletion = hasRole(session.user?.role, ["GeneralManager"]) && deletionPending;
   const primaryLabel =
     lead.state === "Qualified"
       ? "Upload required documents"
@@ -2301,6 +2735,51 @@ function LeadDetailContent() {
       setAssignmentBusy(false);
     }
   };
+  const submitDeletion = async (reason?: string) => {
+    if (!lead || !deletionDialog) return;
+    setDeletionBusy(true);
+    try {
+      const result = deletionDialog === "request"
+        ? await api.leads.requestDeletion(lead.id, { reason: reason ?? "", expectedVersion: lead.version })
+        : deletionDialog === "approve"
+          ? await api.leads.approveDeletion(lead.id)
+          : await api.leads.rejectDeletion(lead.id, { reason: reason ?? "" });
+      setDeletionDialog(null);
+      if (result.status === "Approved") {
+        navigate("/pipeline", { replace: true });
+        return;
+      }
+      setNotice({ message: result.message, tone: "success" });
+      await load();
+    } catch (e) {
+      setNotice({ message: errorMessage(e, "Unable to update the lead deletion request."), tone: "error" });
+    } finally {
+      setDeletionBusy(false);
+    }
+  };
+  const submitMoveBack = async (reason: string) => {
+    if (!moveBackTarget) return;
+    setMoveBackBusy(true);
+    try {
+      await api.leads.moveBack(lead.id, {
+        reason,
+        expectedVersion: lead.version,
+      });
+      setMoveBackOpen(false);
+      setNotice({
+        message: `Lead moved back to ${moveBackTarget.label}. The reason was recorded in the audit log.`,
+        tone: "success",
+      });
+      await load();
+    } catch (e) {
+      setNotice({
+        message: errorMessage(e, "Unable to move the lead back."),
+        tone: "error",
+      });
+    } finally {
+      setMoveBackBusy(false);
+    }
+  };
   const primaryMeta =
     lead.state === "Qualified"
       ? "Down payment invoice is the next required action"
@@ -2366,10 +2845,69 @@ function LeadDetailContent() {
               <UsersRound size={16} /> Change owner
             </button>
           )}
+          {canSeeMoveBack && (canMoveBack ? (
+            <button className="button button-secondary" onClick={() => setMoveBackOpen(true)}>
+              <CornerUpLeft size={16} /> Move back
+            </button>
+          ) : (
+            <span
+              className="disabled-action"
+              title={moveBackUnavailableReason ?? "This stage cannot be moved back through the standard workflow."}
+            >
+              <button
+                className="button button-secondary"
+                disabled
+                aria-disabled="true"
+                aria-label={`Move back unavailable. ${moveBackUnavailableReason ?? "This stage cannot be moved back through the standard workflow."}`}
+              >
+                <CornerUpLeft size={16} /> Move back
+              </button>
+            </span>
+          ))}
+          {canRequestDeletion && (
+            <button className="button button-danger" onClick={() => setDeletionDialog("request")}>
+              <Trash2 size={16} /> Delete lead
+            </button>
+          )}
+          {canReviewDeletion && (
+            <>
+              <button className="button button-danger" onClick={() => setDeletionDialog("approve")}>
+                <Trash2 size={16} /> Approve deletion
+              </button>
+              <button className="button button-secondary" onClick={() => setDeletionDialog("reject")}>
+                Reject request
+              </button>
+            </>
+          )}
         </div>
       }
     >
       {notice && <NoticeBar notice={notice} onClose={() => setNotice(null)} />}
+      {deletionPending && (
+        <section className="deletion-review-banner" role="status">
+          <div className="deletion-review-banner-icon"><Trash2 size={18} /></div>
+          <div>
+            <strong>Deletion request pending General Manager approval</strong>
+            <p>
+              Requested by {lead.deletionRequestedByName ?? "a Sales Agent"}
+              {lead.deletionRequestedAt ? ` on ${formatDateTime(lead.deletionRequestedAt)}` : ""}.
+              {lead.deletionReason ? ` Reason: ${lead.deletionReason}` : ""}
+            </p>
+          </div>
+        </section>
+      )}
+      {lead.state === "NotInterested" && (
+        <section className="not-interested-banner" role="status">
+          <div className="not-interested-banner-icon"><Archive size={18} /></div>
+          <div>
+            <strong>Closed as not interested</strong>
+            <p>
+              This lead is hidden from the active Kanban and retained in the Not interested view.
+              {lead.notInterestedReason ? ` Reason: ${lead.notInterestedReason}` : ""}
+            </p>
+          </div>
+        </section>
+      )}
       <LeadWorkflowProgress lead={lead} payment={payment} onSelect={setTab} />
       <nav
         className="detail-tabs detail-tabs-secondary"
@@ -2422,6 +2960,17 @@ function LeadDetailContent() {
                 />
                 <Info label="Version" value={`v${lead.version}`} />
               </div>
+            </section>
+            <section className="panel lead-notes-panel">
+              <PanelHeader
+                title="Internal notes"
+                subtitle="Useful context for the assigned agent and General Manager. Not sent to the franchisee."
+              />
+              {lead.notes ? (
+                <p className="lead-notes-content">{lead.notes}</p>
+              ) : (
+                <p className="lead-notes-empty">No internal notes are currently saved for this lead.</p>
+              )}
             </section>
             <section className="panel timeline-panel">
               <PanelHeader
@@ -2524,19 +3073,20 @@ function LeadDetailContent() {
           <form className="stack-form" onSubmit={saveAssignment}>
             <label>
               Responsible owner
-              <select
+              <BrandedSelect
                 value={assignmentId}
-                onChange={(event) => setAssignmentId(event.target.value)}
+                onChange={setAssignmentId}
                 required
-              >
-                <option value="">Select owner</option>
-                {assignees.map((user) => (
-                  <option value={user.id} key={user.id}>
-                    {user.displayName} — {roleLabel(user.role as Role)}
-                    {user.id === session.user?.id ? " (You)" : ""}
-                  </option>
-                ))}
-              </select>
+                ariaLabel="Responsible owner"
+                placeholder="Select owner"
+                options={[
+                  { value: "", label: "Select owner" },
+                  ...assignees.map((user) => ({
+                    value: user.id,
+                    label: `${user.displayName} — ${roleLabel(user.role as Role)}${user.id === session.user?.id ? " (You)" : ""}`,
+                  })),
+                ]}
+              />
             </label>
             <div className="form-actions">
               <button className="button button-primary" disabled={assignmentBusy || !assignmentId}>
@@ -2546,13 +3096,156 @@ function LeadDetailContent() {
           </form>
         </Modal>
       )}
+      {deletionDialog && (
+        <LeadDeletionDialog
+          mode={deletionDialog}
+          lead={lead}
+          busy={deletionBusy}
+          onClose={() => { if (!deletionBusy) setDeletionDialog(null); }}
+          onSubmit={submitDeletion}
+        />
+      )}
+      {moveBackOpen && moveBackTarget && (
+        <LeadMoveBackDialog
+          lead={lead}
+          targetLabel={moveBackTarget.label}
+          busy={moveBackBusy}
+          onClose={() => { if (!moveBackBusy) setMoveBackOpen(false); }}
+          onSubmit={submitMoveBack}
+        />
+      )}
     </Page>
+  );
+}
+
+function LeadMoveBackDialog({
+  lead,
+  targetLabel,
+  busy,
+  onClose,
+  onSubmit,
+}: {
+  lead: Lead;
+  targetLabel: string;
+  busy: boolean;
+  onClose: () => void;
+  onSubmit: (reason: string) => Promise<void>;
+}) {
+  const [reason, setReason] = useState("");
+  const valid = reason.trim().length >= 2;
+  return (
+    <Modal
+      title="Move lead back one stage"
+      subtitle="The change takes effect immediately. A reason is required and will be recorded in the audit history."
+      onClose={onClose}
+    >
+      <form
+        className="stack-form"
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (valid) void onSubmit(reason.trim());
+        }}
+      >
+        <div className="move-back-warning">
+          <CornerUpLeft size={20} />
+          <div>
+            <strong>{lead.fullName} will move to {targetLabel}</strong>
+            <span>The current stage and this explanation will remain visible in the audit log. No approval is required.</span>
+          </div>
+        </div>
+        <label>
+          <span>Reason for moving back <span className="required-mark">*</span></span>
+          <textarea
+            autoFocus
+            required
+            minLength={2}
+            maxLength={2000}
+            value={reason}
+            onChange={(event) => setReason(event.target.value)}
+            placeholder="Explain what needs to be revisited before this lead can move forward again."
+          />
+        </label>
+        {!valid && <small className="muted">Enter at least 2 characters explaining why this lead needs to be revisited.</small>}
+        <div className="form-actions">
+          <button type="button" className="button button-secondary" onClick={onClose} disabled={busy}>Cancel</button>
+          <button className="button button-primary" disabled={busy || !valid}>
+            {busy ? "Moving back…" : "Move back one stage"}
+          </button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+function LeadDeletionDialog({
+  mode,
+  lead,
+  busy,
+  onClose,
+  onSubmit,
+}: {
+  mode: "request" | "approve" | "reject";
+  lead: Lead;
+  busy: boolean;
+  onClose: () => void;
+  onSubmit: (reason?: string) => Promise<void>;
+}) {
+  const [reason, setReason] = useState("");
+  const [confirmed, setConfirmed] = useState(false);
+  const rejecting = mode === "reject";
+  const approving = mode === "approve";
+  const title = rejecting ? "Reject deletion request" : approving ? "Approve permanent deletion" : "Delete lead permanently";
+  const subtitle = rejecting
+    ? "Explain why the lead should remain in the pipeline."
+    : approving
+      ? "This will permanently remove the lead and its related workflow records."
+      : "Deletion cannot be undone. A reason is required for the audit trail.";
+  const valid = reason.trim().length >= 2 || approving;
+  return (
+    <Modal title={title} subtitle={subtitle} onClose={onClose}>
+      <form className="stack-form" onSubmit={(event) => { event.preventDefault(); if (valid && (!rejecting || reason.trim().length >= 2) && (rejecting || confirmed)) void onSubmit(reason.trim()); }}>
+        {!rejecting && (
+          <div className="deletion-warning">
+            <AlertTriangle size={20} />
+            <div>
+              <strong>{approving ? "Confirm permanent deletion" : `You are deleting ${lead.fullName}`}</strong>
+              <span>{approving ? "The Sales Agent’s request reason is recorded in the audit trail. This action cannot be reversed." : "The lead, its workflow history, documents, payment records, and queued unsent emails will be removed. The deletion audit record will be retained."}</span>
+            </div>
+          </div>
+        )}
+        {approving && lead.deletionReason && (
+          <div className="deletion-request-reason"><strong>Requested reason</strong><span>{lead.deletionReason}</span></div>
+        )}
+        {!approving && (
+          <label>
+            <span>{rejecting ? "Reason for rejection" : "Reason for deletion"} <span className="required-mark">*</span></span>
+            <textarea autoFocus maxLength={2000} value={reason} onChange={(event) => setReason(event.target.value)} placeholder={rejecting ? "Explain why this lead should remain active." : "Explain why this lead should be permanently deleted."} />
+          </label>
+        )}
+        {!rejecting && (
+          <label className="deletion-confirmation">
+            <input type="checkbox" required aria-required="true" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} />
+            <span>I understand this deletion is permanent and cannot be undone. <span className="required-mark">*</span></span>
+          </label>
+        )}
+        {(!valid || (!rejecting && !confirmed)) && (
+          <small className="muted">{rejecting ? "Enter at least 2 characters for the rejection reason." : "Enter a reason and confirm that you understand this is irreversible."}</small>
+        )}
+        <div className="form-actions">
+          <button type="button" className="button button-secondary" onClick={onClose} disabled={busy}>Cancel</button>
+          <button className={`button ${rejecting ? "button-secondary" : "button-danger"}`} disabled={busy || !valid || (!rejecting && !confirmed)}>
+            {busy ? "Saving…" : rejecting ? "Reject request" : approving ? "Approve and delete" : "Request deletion"}
+          </button>
+        </div>
+      </form>
+    </Modal>
   );
 }
 
 function canPerformPrimaryWorkflowAction(lead: Lead) {
   const role = session.user?.role;
   if (!role) return false;
+  if (lead.state === "NotInterested") return false;
   if (lead.state === "Qualified") return hasRole(role, marketingWriteRoles);
   if (lead.state === "DownPaymentPending")
     return hasRole(role, ["Finance"]) || hasRole(role, marketingWriteRoles);
@@ -2609,6 +3302,30 @@ function WorkflowActionArea({
   }, [lead.id, lead.state]);
   const canPrimary =
     canPrimaryOverride ?? canPerformPrimaryWorkflowAction(lead);
+  if (lead.state === "NotInterested") {
+    return (
+      <section className="panel workflow-action-area workflow-action-area-complete">
+        <div className="workflow-current">
+          <span>Current status</span>
+          <StatusPill state={lead.state} />
+        </div>
+        <span className="eyebrow">CLOSED OUTCOME</span>
+        <h3>Not interested</h3>
+        <p className="workflow-action-description">
+          This lead is no longer an active opportunity. Its record, reason, and audit history remain available for reference.
+        </p>
+        {lead.notInterestedReason && (
+          <div className="completion-card">
+            <Archive size={19} />
+            <div>
+              <strong>Recorded reason</strong>
+              <span>{lead.notInterestedReason}</span>
+            </div>
+          </div>
+        )}
+      </section>
+    );
+  }
   if (handoffAcknowledged) {
     return (
       <section className="panel workflow-action-area workflow-action-area-complete">
@@ -2704,6 +3421,22 @@ function LeadWorkflowProgress({
     ? lifecycleSteps.length
     : workflowStateIndex(lead.state, payment);
   const currentStage = lifecycleStageForLead(lead.state, payment);
+  if (lead.state === "NotInterested") {
+    return (
+      <section className="workflow-progress-panel not-interested-progress">
+        <div className="workflow-progress-heading">
+          <div>
+            <span className="eyebrow">CLOSED OUTCOME</span>
+            <strong>This opportunity is outside the active franchise lifecycle.</strong>
+          </div>
+          <span>Not interested</span>
+        </div>
+        <div className="read-only-note">
+          <Archive size={16} /> Review the record from the Not interested view when needed.
+        </div>
+      </section>
+    );
+  }
   return (
     <section className="workflow-progress-panel">
       <div className="workflow-progress-heading">
@@ -3089,7 +3822,7 @@ function LeadTab({
       />
     );
   if (tab === "Documents")
-    return <DocumentsPanel lead={lead} onNotice={onNotice} />;
+    return <DocumentsPanel lead={lead} onNotice={onNotice} paginate />;
   if (tab === "Contract")
     return (
       <ContractPanel lead={lead} onReload={onReload} onNotice={onNotice} />
@@ -3293,28 +4026,28 @@ function ActivitiesPanel({
             placeholder="Search activities..."
           />
         </div>
-        <select
+        <BrandedSelect
           value={filter}
-          onChange={(event) => setFilter(event.target.value as ActivityFilter)}
-          aria-label="Activity type"
-        >
-          <option value="all">All activity</option>
-          <option value="workflow">Workflow</option>
-          <option value="communication">Communication</option>
-          <option value="documents">Documents</option>
-          <option value="finance">Finance</option>
-        </select>
-        <select
+          onChange={(value) => setFilter(value as ActivityFilter)}
+          ariaLabel="Activity type"
+          options={[
+            { value: "all", label: "All activity" },
+            { value: "workflow", label: "Workflow" },
+            { value: "communication", label: "Communication" },
+            { value: "documents", label: "Documents" },
+            { value: "finance", label: "Finance" },
+          ]}
+        />
+        <BrandedSelect
           value={dateFilter}
-          onChange={(event) =>
-            setDateFilter(event.target.value as "all" | "today" | "earlier")
-          }
-          aria-label="Activity date"
-        >
-          <option value="all">All dates</option>
-          <option value="today">Today</option>
-          <option value="earlier">Earlier</option>
-        </select>
+          onChange={(value) => setDateFilter(value as "all" | "today" | "earlier")}
+          ariaLabel="Activity date"
+          options={[
+            { value: "all", label: "All dates" },
+            { value: "today", label: "Today" },
+            { value: "earlier", label: "Earlier" },
+          ]}
+        />
       </div>
       {visible.length ? (
         <div className="business-timeline">
@@ -3442,6 +4175,7 @@ function WorkflowPanel({
   const contractActive = currentStage.label === "Contract";
   const handoffActive = lead.state === "EndorsedToAdmin" || lead.state === "Acknowledged";
   const [contract, setContract] = useState<Contract | null>(null);
+  const manualContract = contract?.signingMethod === "Manual";
   const [endorsement, setEndorsement] = useState<Record<string, unknown> | null>(null);
   const [documentsReadyForLead, setDocumentsReadyForLead] = useState<string | null>(null);
   const handoffAcknowledged =
@@ -3557,6 +4291,23 @@ function WorkflowPanel({
   const paymentStatus = String(
     statusLabel(String(payment?.status ?? (lead.state === "Qualified" ? "NotGenerated" : "Pending"))),
   );
+  if (lead.state === "NotInterested") {
+    return (
+      <section className="panel tab-panel">
+        <PanelHeader
+          title="Closed outcome"
+          subtitle="This lead is retained for context and audit history, but has no active workflow actions."
+        />
+        <div className="completion-card">
+          <Archive size={19} />
+          <div>
+            <strong>Not interested</strong>
+            <span>{lead.notInterestedReason ?? "No reason recorded."}</span>
+          </div>
+        </div>
+      </section>
+    );
+  }
   const openInvoice = async () => {
     try {
       const result = await api.leads.invoiceDownload(lead.id);
@@ -3858,16 +4609,26 @@ function WorkflowPanel({
                       active: !contract,
                     },
                     {
-                      label: "Review / finalize",
-                      detail: "Review the generated agreement and route it for approval.",
-                      complete: ["Approved", "Signed"].includes(contract?.status ?? ""),
-                      active: Boolean(contract) && !["Approved", "Signed"].includes(contract?.status ?? ""),
+                      label: manualContract ? "Prepare manual signing" : "Review / finalize",
+                      detail: manualContract
+                        ? "Upload the floor plan, perspective, and scanned signed contract."
+                        : "Review the generated agreement and route it for approval.",
+                      complete: manualContract
+                        ? contract?.status === "Signed"
+                        : ["Approved", "Signed"].includes(contract?.status ?? ""),
+                      active: Boolean(contract) && (manualContract
+                        ? contract?.status !== "Signed"
+                        : !["Approved", "Signed"].includes(contract?.status ?? "")),
                     },
                     {
-                      label: "Complete contract",
-                      detail: "Finish signing, then continue to Pre-launch.",
-                      complete: lead.state === "ContractSigned",
-                      active: contract?.status === "Approved",
+                      label: manualContract ? "Start pre-launch" : "Complete contract",
+                      detail: manualContract
+                        ? "Confirm the uploaded signed contract to start pre-launch."
+                        : "Finish signing, then continue to Pre-launch.",
+                      complete: manualContract ? lead.state === "PreLaunch" : lead.state === "ContractSigned",
+                      active: manualContract
+                        ? contract?.status === "Signed" && lead.state !== "PreLaunch"
+                        : contract?.status === "Approved",
                     },
                   ].map((step, index) => (
                     <div className={`${step.complete ? "complete" : ""} ${step.active ? "active" : ""}`} key={step.label}>
@@ -4710,7 +5471,7 @@ function InquiryPanel({
 }) {
   const [form, setForm] = useState({
     fullName: lead.fullName,
-    age: lead.age?.toString() ?? "",
+    birthDate: lead.birthDate?.slice(0, 10) ?? "",
     contactNumber: lead.contactNumber,
     email: lead.email,
     sourceOfIncome: lead.sourceOfIncome,
@@ -4723,13 +5484,17 @@ function InquiryPanel({
   const [inquiryLead, setInquiryLead] = useState<Lead>(lead);
   const [loading, setLoading] = useState(false);
   const [attempted, setAttempted] = useState(false);
+  const calculatedAge = calculatedAgeFromBirthDate(form.birthDate);
+  const invalidBirthDate =
+    form.birthDate.trim().length > 0 &&
+    (calculatedAge == null || calculatedAge < 18 || calculatedAge > 120);
 
   const loadInquiry = async () => {
     const item = await api.leads.getInquiry(lead.id);
     setInquiryLead(item);
     setForm({
       fullName: item.fullName,
-      age: item.age?.toString() ?? "",
+      birthDate: item.birthDate?.slice(0, 10) ?? "",
       contactNumber: item.contactNumber,
       email: item.email,
       sourceOfIncome: item.sourceOfIncome,
@@ -4747,7 +5512,7 @@ function InquiryPanel({
 
   const inquiryPayload = () => ({
     ...form,
-    age: form.age ? Number(form.age) : null,
+    birthDate: form.birthDate || null,
     meetingDateTime: form.meetingDateTime
       ? new Date(form.meetingDateTime).toISOString()
       : null,
@@ -4764,6 +5529,10 @@ function InquiryPanel({
   const save = async (event: FormEvent) => {
     event.preventDefault();
     setAttempted(true);
+    if (invalidBirthDate) {
+      onNotice({ message: "Enter a valid birthdate for an adult franchisee.", tone: "error" });
+      return;
+    }
     setLoading(true);
     try {
       const currentLead = await ensureInquiryStarted();
@@ -4793,7 +5562,7 @@ function InquiryPanel({
 
   const missing = [
     form.fullName.trim() ? null : "Full name",
-    form.age.trim() ? null : "Age",
+    form.birthDate.trim() ? null : "Birthdate",
     form.contactNumber.trim() ? null : "Contact number",
     form.email.trim() ? null : "Email",
     form.sourceOfIncome.trim() ? null : "Source of income",
@@ -4818,6 +5587,8 @@ function InquiryPanel({
         </div>
         <div className="snapshot-grid">
           <Info label="Full name" value={inquiryLead.fullName} />
+          <Info label="Birthdate" value={inquiryLead.birthDate ?? "Not provided"} />
+          <Info label="Age" value={inquiryLead.age == null ? "Not provided" : `${inquiryLead.age} years`} />
           <Info label="Contact" value={inquiryLead.contactNumber} />
           <Info label="Email" value={inquiryLead.email} />
           <Info
@@ -4849,7 +5620,7 @@ function InquiryPanel({
         {(
           [
             ["fullName", "Full name", true],
-            ["age", "Age", true],
+            ["birthDate", "Birthdate", true],
             ["contactNumber", "Contact number", true],
             ["email", "Email", true],
             ["meetingDateTime", "Meeting date and time", false],
@@ -4861,7 +5632,21 @@ function InquiryPanel({
               {label}
               {required ? <span className="required-mark"> *</span> : null}
             </span>
-            {key === "meetingDateTime" ? (
+            {key === "birthDate" ? (
+              <BrandedDateTimePicker
+                value={form.birthDate}
+                onChange={(birthDate) =>
+                  setForm((current) => ({ ...current, birthDate }))
+                }
+                dateOnly
+                maxDate={localDateValue(new Date())}
+                required={required}
+                invalid={attempted && invalidBirthDate}
+                selectedLabel="Birthdate"
+                emptyLabel="Required · choose birthdate"
+                clearLabel="Clear birthdate"
+              />
+            ) : key === "meetingDateTime" ? (
               <BrandedDateTimePicker
                 value={form.meetingDateTime}
                 onChange={(meetingDateTime) =>
@@ -4874,17 +5659,28 @@ function InquiryPanel({
                 onChange={(e) =>
                   setForm((current) => ({ ...current, [key]: e.target.value }))
                 }
-                type={key === "age" ? "number" : key === "email" ? "email" : "text"}
+                type={key === "email" ? "email" : "text"}
                 required={Boolean(required)}
                 aria-invalid={attempted && required && !form[key].trim()}
                 className={attempted && required && !form[key].trim() ? "field-missing" : undefined}
               />
             )}
-            {attempted && required && !form[key].trim() ? (
+            {attempted && key === "birthDate" && invalidBirthDate ? (
+              <small className="field-error">Enter a valid birthdate for an adult franchisee.</small>
+            ) : attempted && required && !form[key].trim() ? (
               <small className="field-error">{label} is required.</small>
             ) : null}
           </label>
           ))}
+        <label>
+          <span>Calculated age</span>
+          <input
+            value={calculatedAge == null ? "Enter a birthdate" : `${calculatedAge} years`}
+            readOnly
+            aria-readonly="true"
+          />
+          <small className="field-hint">Calculated automatically from the birthdate.</small>
+        </label>
         <div className="form-wide">
           <label>
             <span>
@@ -4985,7 +5781,7 @@ function QualificationPanel({
   onNotice: (notice: Notice) => void;
 }) {
   const [notes, setNotes] = useState("");
-  const [decision, setDecision] = useState<"qualified" | "follow_up">(
+  const [decision, setDecision] = useState<"qualified" | "follow_up" | "not_interested">(
     "qualified",
   );
   const [followUpAt, setFollowUpAt] = useState("");
@@ -5094,10 +5890,15 @@ function QualificationPanel({
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
+    const markingNotInterested = decision === "not_interested";
     const missing = [
-      !productLine ? "Product line" : null,
-      !callOutcome.trim() ? "Call outcome" : null,
-      !notes.trim() ? "Contact and assessment notes" : null,
+      !markingNotInterested && !productLine ? "Product line" : null,
+      !markingNotInterested && !callOutcome.trim() ? "Call outcome" : null,
+      !notes.trim()
+        ? markingNotInterested
+          ? "Reason for marking not interested"
+          : "Contact and assessment notes"
+        : null,
     ].filter((item): item is string => Boolean(item));
     if (missing.length) {
       onNotice({
@@ -5116,7 +5917,7 @@ function QualificationPanel({
     setBusy(true);
     try {
       let qualificationVersion = version;
-      if (!nurturingSaved) {
+      if (!markingNotInterested && !nurturingSaved) {
         qualificationVersion = await persistNurturingDetails();
       }
       await api.leads.qualify(lead.id, {
@@ -5128,7 +5929,11 @@ function QualificationPanel({
       await onReload();
       onNotice({
         message:
-          decision === "qualified" ? "Lead qualified." : "Follow-up scheduled.",
+          decision === "qualified"
+            ? "Lead qualified."
+            : decision === "follow_up"
+              ? "Follow-up scheduled."
+              : "Lead marked not interested and moved out of the active pipeline.",
         tone: "success",
       });
     } catch (e) {
@@ -5163,11 +5968,15 @@ function QualificationPanel({
             <strong>
               {lead.state === "Qualified"
                 ? "Lead qualified"
+                : lead.state === "NotInterested"
+                  ? "Lead marked not interested"
                 : "Qualification completed"}
             </strong>
             <span>
               {lead.state === "Qualified"
                 ? "The opportunity is ready for its required document upload."
+                : lead.state === "NotInterested"
+                  ? lead.notInterestedReason ?? "The lead was closed with no reason recorded."
                 : `This opportunity is now in ${labelForState(lead.state)}.`}
             </span>
           </div>
@@ -5181,7 +5990,12 @@ function QualificationPanel({
                 : labelForState(lead.state)
             }
           />
-          <Info label="Recorded notes" value={notes || "No notes recorded"} />
+          <Info
+            label={lead.state === "NotInterested" ? "Recorded reason" : "Recorded notes"}
+            value={lead.state === "NotInterested"
+              ? lead.notInterestedReason ?? "No reason recorded"
+              : notes || "No notes recorded"}
+          />
           <Info
             label="Next step"
             value={
@@ -5199,7 +6013,7 @@ function QualificationPanel({
         title="Qualify this lead"
         subtitle="Follow the decision step-by-step so the next owner knows what happened."
       />
-      <div className="workflow-instructions">
+      {decision !== "not_interested" && <div className="workflow-instructions">
         <strong>How to complete this step</strong>
         <span>
           1. Review the system-tracked welcome email delivery and record the call outcome.
@@ -5208,8 +6022,8 @@ function QualificationPanel({
         <span>
           3. Save the nurturing details, then qualify or create a follow-up.
         </span>
-      </div>
-      {[
+      </div>}
+      {decision !== "not_interested" && [
         !productLine ? "Product line" : null,
         !callOutcome.trim() ? "Call outcome" : null,
       ].some(Boolean) ? (
@@ -5225,25 +6039,28 @@ function QualificationPanel({
           </span>
         </div>
       ) : null}
-      <div className="process-card">
+      {decision !== "not_interested" && <div className="process-card">
         <div className="form-grid">
           <label>
             Product line
-            <select
+            <BrandedSelect
               value={productLine}
-              onChange={(e) => {
-                setProductLine(e.target.value as ProductLine | "");
+              onChange={(value) => {
+                setProductLine(value as ProductLine | "");
                 setNurturingSaved(false);
               }}
               required
-              aria-invalid={!productLine}
               className={!productLine ? "field-missing" : undefined}
-            >
-              <option value="">Select product</option>
-              <option value="Abc">ABC</option>
-              <option value="Pharmacy">Pharmacy</option>
-              <option value="Combo">Combo</option>
-            </select>
+              invalid={!productLine}
+              ariaLabel="Product line"
+              placeholder="Select product"
+              options={[
+                { value: "", label: "Select product" },
+                { value: "Abc", label: "ABC" },
+                { value: "Pharmacy", label: "Pharmacy" },
+                { value: "Combo", label: "Combo" },
+              ]}
+            />
           </label>
           <label>
             Agreed actual price
@@ -5295,10 +6112,10 @@ function QualificationPanel({
             ? "Nurturing details saved ✓"
             : "Save nurturing details"}
         </button>
-      </div>
+      </div>}
       <form className="stack-form qualification-form" onSubmit={submit} noValidate>
         <label>
-          Contact and assessment notes
+          {decision === "not_interested" ? "Reason for marking not interested" : "Contact and assessment notes"}
           <textarea
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
@@ -5306,21 +6123,32 @@ function QualificationPanel({
             aria-invalid={!notes.trim()}
             className={!notes.trim() ? "field-missing" : undefined}
             maxLength={4000}
-            placeholder="What did you discuss? What is the lead's readiness, concern, or next commitment?"
+            placeholder={decision === "not_interested"
+              ? "Briefly explain why the lead is not interested, such as timing, budget, or a decision to stop pursuing the opportunity."
+              : "What did you discuss? What is the lead's readiness, concern, or next commitment?"}
           />
         </label>
         <label>
           Decision
-          <select
+          <BrandedSelect
             value={decision}
-            onChange={(e) =>
-              setDecision(e.target.value as "qualified" | "follow_up")
+            onChange={(value) =>
+              setDecision(value as "qualified" | "follow_up" | "not_interested")
             }
-          >
-            <option value="qualified">Qualified — move to down payment</option>
-            <option value="follow_up">Follow-up needed — keep nurturing</option>
-          </select>
+            ariaLabel="Decision"
+            options={[
+              { value: "qualified", label: "Qualified — move to down payment" },
+              { value: "follow_up", label: "Follow-up needed — keep nurturing" },
+              { value: "not_interested", label: "Not interested — close this opportunity" },
+            ]}
+          />
         </label>
+        {decision === "not_interested" && (
+          <div className="not-interested-warning" role="status">
+            <Archive size={18} />
+            <span>This will remove the lead from the active Kanban. The reason is required, and the record will remain available in the Not interested view.</span>
+          </div>
+        )}
         {decision === "follow_up" && (
           <label>
             Follow-up date and time
@@ -5388,7 +6216,7 @@ function LocationAnalysisPanel({
   const answeredCount = Object.keys(answers).length;
   const completion = Math.round((answeredCount / questionCount) * 100);
   const answerList = Object.values(answers);
-  const isReturned = status === "Failed";
+  const isReturned = status === "Failed" || status === "Returned";
   const isReadOnly = (Boolean(analysis?.submittedAt) && !isReturned) || status === "Passed" || !canEdit;
 
   const saveDraft = async () => {
@@ -5405,8 +6233,7 @@ function LocationAnalysisPanel({
     return value;
   };
 
-  const saveAssessment = async (event: FormEvent) => {
-    event.preventDefault();
+  const saveAssessment = async () => {
     setBusy(true);
     try {
       await saveDraft();
@@ -5472,7 +6299,7 @@ function LocationAnalysisPanel({
         </div>
         <div className="location-analysis-progress"><div><strong>{answeredCount} / {questionCount} answered</strong><span>{completion}% complete</span></div><div className="progress-track"><i style={{ width: `${completion}%` }} /></div></div>
         {!lead.preferredLocation && !analysis && <div className="location-analysis-callout"><AlertTriangle size={17} /> Add the proposed location in the Inquiry tab first, then return here to complete this assessment.</div>}
-        <form onSubmit={saveAssessment}>
+        <div>
           <div className="location-analysis-meta">
             <label>
               Proposed franchise location <span className="required-mark"> *</span>
@@ -5488,7 +6315,7 @@ function LocationAnalysisPanel({
               />
             </label>
             <label>Candidate<input value={analysis?.candidateName ?? lead.fullName} readOnly /></label>
-            <label>Lease / ownership<select value={leaseOwnershipStatus} onChange={(e) => setLeaseOwnershipStatus(e.target.value)} disabled={isReadOnly}><option value="">Select status</option>{leaseOwnershipOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+            <label>Lease / ownership<BrandedSelect value={leaseOwnershipStatus} onChange={setLeaseOwnershipStatus} disabled={isReadOnly} ariaLabel="Lease or ownership status" placeholder="Select status" options={[{ value: "", label: "Select status" }, ...leaseOwnershipOptions.map(([value, label]) => ({ value, label }))]} /></label>
           </div>
           {isReturned && <div className="location-analysis-review returned"><strong>Changes requested by General Manager</strong><p>{analysis?.revisionReason || "Review the feedback below and resubmit when ready."}</p></div>}
           <div className="location-analysis-groups">
@@ -5507,17 +6334,39 @@ function LocationAnalysisPanel({
             })}
           </div>
           <label className="location-analysis-notes">Overall assessment notes<textarea value={notes} onChange={(e) => setNotes(e.target.value)} maxLength={2000} disabled={isReadOnly} placeholder="Summarize important findings and risks." /></label>
-          <p className="location-analysis-supporting"><FileText size={15} /> Add supporting photos or documents from the Documents tab.</p>
-          {canEdit && !isReadOnly && <div className="location-analysis-actions"><button type="submit" className="button button-secondary" disabled={busy}>{busy ? "Saving…" : "Save draft"}</button><button type="button" className="button button-primary" disabled={busy || answeredCount !== questionCount || !leaseOwnershipStatus} onClick={submitForReview}><Send size={15} /> Submit for GM review</button></div>}
+          <section className="location-analysis-attachments">
+            <div className="location-analysis-attachments-heading">
+              <div>
+                <span className="eyebrow">SUPPORTING FILES</span>
+                <strong>Attach evidence for this location analysis</strong>
+                <p>Upload site photos, lease/address documents, floor plans, or perspectives without leaving this page.</p>
+              </div>
+              <FileText size={19} />
+            </div>
+            <DocumentsPanel
+              lead={lead}
+              onNotice={onNotice}
+              onDocumentsChanged={onReload}
+              embedded
+              visibleTypes={locationSupportingDocumentTypes.map(([type]) => type)}
+              documentTypeOptions={locationSupportingDocumentTypes}
+              hideUpload={!canEdit || isReadOnly || !preferredLocation.trim()}
+              hideEmptyState
+            />
+            {!preferredLocation.trim() && canEdit && !isReadOnly && (
+              <small className="location-analysis-attachments-hint">Add the proposed location above before attaching supporting files.</small>
+            )}
+          </section>
+          {canEdit && !isReadOnly && <div className="location-analysis-actions"><button type="button" className="button button-secondary" disabled={busy} onClick={() => void saveAssessment()}>{busy ? "Saving…" : "Save draft"}</button><button type="button" className="button button-primary" disabled={busy || answeredCount !== questionCount || !leaseOwnershipStatus} onClick={submitForReview}><Send size={15} /> Submit for GM review</button></div>}
           {canReview && Boolean(analysis?.submittedAt) && status === "Pending" && <div className="location-analysis-review"><span className="eyebrow">GENERAL MANAGER REVIEW</span><h3>Review the completed assessment</h3><textarea value={reviewNotes} onChange={(e) => setReviewNotes(e.target.value)} maxLength={2000} placeholder="Add approval notes or explain what needs revision." /><div className="location-analysis-actions"><button type="button" className="button button-secondary" disabled={busy} onClick={() => review("Returned")}>Return for revision</button><button type="button" className="button button-primary" disabled={busy} onClick={() => review("Approved")}><CheckCircle2 size={15} /> Approve analysis</button></div></div>}
           {status === "Passed" && <div className="location-analysis-finished"><CheckCircle2 size={17} /><div><strong>Location analysis passed</strong><p>{analysis?.evaluatedByName ? `Passed by ${analysis.evaluatedByName}.` : "The assessment is complete and read-only."}</p></div></div>}
           {!canEdit && !canReview && <div className="read-only-note"><ShieldCheck size={16} /> Location analysis is view-only for your role.</div>}
-        </form>
+        </div>
       </div>
       <aside className="location-analysis-sidebar">
         <div className="location-analysis-summary"><span className="eyebrow">ASSESSMENT SUMMARY</span><strong>{completion}% complete</strong><p>{answeredCount} of {questionCount} criteria answered</p><div className="location-response-counts">{responseCounts.map((item) => <div key={item.code}><span className={`response-dot ${item.code.toLowerCase()}`} />{locationAnalysisResponseLabels[item.code]}<strong>{item.count}</strong></div>)}<div><span className="response-dot unanswered" />Unanswered<strong>{questionCount - answeredCount}</strong></div></div></div>
         {attention.length > 0 && <div className="location-analysis-attention"><span className="eyebrow">ITEMS REQUIRING ATTENTION</span>{attention.slice(0, 4).map((answer) => <div key={answer.questionCode}><AlertTriangle size={14} /><span>{locationAnalysisQuestions.find((question) => question.code === answer.questionCode)?.prompt}</span></div>)}</div>}
-        <div className="location-analysis-next"><span className="eyebrow">NEXT</span><strong>{analysis?.submittedAt && status === "Pending" ? "Awaiting General Manager review" : status === "Passed" ? "Assessment passed" : nextGroup ? `Complete ${nextGroup}` : "Ready to submit"}</strong><p>{status === "Failed" ? "Update the requested items and submit again." : "Responses are saved as a draft until submitted."}</p></div>
+        <div className="location-analysis-next"><span className="eyebrow">NEXT</span><strong>{analysis?.submittedAt && status === "Pending" ? "Awaiting General Manager review" : status === "Passed" ? "Assessment passed" : nextGroup ? `Complete ${nextGroup}` : "Ready to submit"}</strong><p>{isReturned ? "Update the requested items and submit again." : "Responses are saved as a draft until submitted."}</p></div>
       </aside>
     </section>
   );
@@ -5559,12 +6408,15 @@ function DocumentsPanel({
   uploadedOnly = false,
   compactAfterUpload = false,
   documentCard = false,
+  paginate = false,
   hideEmptyState = false,
   relatedPaymentId,
+  documentTypeOptions,
+  contractSigningMethod,
 }: {
   lead: Pick<Lead, "id">;
   onNotice: (notice: Notice) => void;
-  onDocumentsChanged?: () => Promise<void>;
+  onDocumentsChanged?: (documents?: DocumentItem[]) => Promise<void> | void;
   embedded?: boolean;
   fixedDocumentType?: string;
   visibleTypes?: string[];
@@ -5573,22 +6425,26 @@ function DocumentsPanel({
   uploadedOnly?: boolean;
   compactAfterUpload?: boolean;
   documentCard?: boolean;
+  paginate?: boolean;
   hideEmptyState?: boolean;
   relatedPaymentId?: string;
+  documentTypeOptions?: [string, string][];
+  contractSigningMethod?: "Manual" | "Electronic";
 }) {
   const [documents, setDocuments] = useState<DocumentItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [file, setFile] = useState<File | null>(null);
   const [documentType, setDocumentType] = useState(
-    fixedDocumentType ?? "VALID_ID_SIGNATURES",
+    fixedDocumentType ?? documentTypeOptions?.[0]?.[0] ?? "VALID_ID_SIGNATURES",
   );
   const [busy, setBusy] = useState(false);
   const [replaceMode, setReplaceMode] = useState(false);
+  const [page, setPage] = useState(1);
   const canUpload =
     fixedDocumentType === "PAYMENT_RECEIPT" || fixedDocumentType === "BALANCE_PAYMENT_RECEIPT"
       ? hasRole(session.user?.role, ["SalesAgent", "GeneralManager"])
       : hasRole(session.user?.role, ["SalesAgent", "GeneralManager"]);
-  const uploadOptions: [string, string][] = [
+  const defaultUploadOptions: [string, string][] = [
     ...(hasRole(session.user?.role, ["Finance"])
       ? [["PAYMENT_RECEIPT", "Payment receipt or bank confirmation"] as [string, string]]
       : []),
@@ -5603,6 +6459,7 @@ function DocumentsPanel({
         ] as [string, string][])
       : []),
   ];
+  const uploadOptions = documentTypeOptions ?? defaultUploadOptions;
   const typeFilteredDocuments = fixedDocumentType
     ? documents.filter((item) => item.documentType === fixedDocumentType && (!relatedPaymentId || item.relatedPaymentId === relatedPaymentId))
     : visibleTypes?.length
@@ -5615,21 +6472,33 @@ function DocumentsPanel({
   const displayedDocuments = uploadedOnly || compactMode
     ? uploadedDocuments
     : typeFilteredDocuments;
-  const reload = () =>
-    api.leads
-      .documents(lead.id)
-      .then(setDocuments)
-      .catch((e) =>
-        onNotice({
-          message: errorMessage(e, "Unable to load documents."),
-          tone: "error",
-        }),
-      )
-      .finally(() => setLoading(false));
+  const totalPages = Math.max(1, Math.ceil(displayedDocuments.length / 10));
+  const pagedDocuments = paginate
+    ? displayedDocuments.slice((page - 1) * 10, page * 10)
+    : displayedDocuments;
+  const reload = async (): Promise<DocumentItem[] | undefined> => {
+    try {
+      const nextDocuments = await api.leads.documents(lead.id);
+      setDocuments(nextDocuments);
+      return nextDocuments;
+    } catch (e) {
+      onNotice({
+        message: errorMessage(e, "Unable to load documents."),
+        tone: "error",
+      });
+      return undefined;
+    } finally {
+      setLoading(false);
+    }
+  };
   useEffect(() => {
     if (fixedDocumentType) setDocumentType(fixedDocumentType);
+    setPage(1);
     void reload();
   }, [lead.id, fixedDocumentType]);
+  useEffect(() => {
+    setPage((current) => Math.min(current, totalPages));
+  }, [totalPages]);
   const selectFile = (selectedFile?: File) => {
     if (selectedFile) setFile(selectedFile);
   };
@@ -5673,9 +6542,10 @@ function DocumentsPanel({
       }
       setFile(null);
       setReplaceMode(false);
+      setPage(1);
       onNotice({ message: "Document uploaded securely.", tone: "success" });
-      await reload();
-      await onDocumentsChanged?.();
+      const refreshedDocuments = await reload();
+      await onDocumentsChanged?.(refreshedDocuments);
     } catch (e) {
       onNotice({
         message: errorMessage(e, "Unable to upload document."),
@@ -5687,9 +6557,18 @@ function DocumentsPanel({
   };
   const download = async (item: DocumentItem) => {
     try {
-      const result = (await api.leads.downloadUrl(lead.id, item.id)) as {
-        downloadUrl: string;
-      };
+      const result = item.downloadKind === "Invoice"
+        ? await api.leads.invoiceDownload(lead.id)
+        : item.downloadKind === "AcknowledgementReceipt"
+          ? await api.leads.acknowledgementReceiptDownload(lead.id)
+          : item.downloadKind === "BalanceAcknowledgementReceipt"
+            ? item.relatedPaymentId
+              ? await api.leads.balanceAcknowledgementReceiptDownload(item.relatedPaymentId)
+              : null
+            : item.downloadKind === "Contract"
+              ? await api.leads.contractDownload(lead.id)
+              : await api.leads.downloadUrl(lead.id, item.id) as { downloadUrl: string };
+      if (!result?.downloadUrl) throw new Error("This generated document is not available yet.");
       window.open(result.downloadUrl, "_blank", "noopener,noreferrer");
     } catch (e) {
       onNotice({
@@ -5702,18 +6581,14 @@ function DocumentsPanel({
     <>
       {canUpload && !hideUpload && !compactMode ? (
         <form className="document-upload" onSubmit={upload}>
-          {!embedded && !fixedDocumentType && (
-            <select
+          {!fixedDocumentType && (!embedded || documentTypeOptions) && (
+            <BrandedSelect
               value={documentType}
-              onChange={(e) => setDocumentType(e.target.value)}
-              aria-label="Document type"
-            >
-              {uploadOptions.map(([value, label]) => (
-                <option value={value} key={value}>
-                  {label}
-                </option>
-              ))}
-            </select>
+              onChange={setDocumentType}
+              disabled={busy}
+              ariaLabel="Document type"
+              options={uploadOptions.map(([value, label]) => ({ value, label }))}
+            />
           )}
           <DocumentDropzone file={file} onChange={selectFile} />
           <button className="button button-primary" disabled={busy || !file}>
@@ -5730,8 +6605,8 @@ function DocumentsPanel({
       ) : displayedDocuments.length ? (
         documentCard && uploadedDocuments.length > 0 && !replaceMode ? (
           <div className="contract-uploaded-files">
-            {uploadedDocuments.map((item) => (
-              <div className="contract-uploaded-file" key={item.id}>
+            {pagedDocuments.map((item) => (
+              <div className="contract-uploaded-file" key={`document-${item.downloadKind ?? "uploaded"}-${item.documentType}-${item.id}`}>
                 <div className="contract-uploaded-file-main">
                   <div className="document-icon"><FileText size={17} /></div>
                   <div>
@@ -5745,6 +6620,14 @@ function DocumentsPanel({
                 </div>
               </div>
             ))}
+            {paginate && totalPages > 1 && (
+              <PaginationControls
+                page={page}
+                totalPages={totalPages}
+                total={displayedDocuments.length}
+                onPageChange={setPage}
+              />
+            )}
           </div>
         ) : collapsible || compactMode ? (
           <details className="document-disclosure">
@@ -5753,34 +6636,50 @@ function DocumentsPanel({
               <strong>{displayedDocuments.length}</strong>
             </summary>
             <div className="document-list">
-              {displayedDocuments.map((item) => (
-                <div className="document-row" key={item.id}>
+              {pagedDocuments.map((item) => (
+                <div className="document-row" key={`document-${item.downloadKind ?? "uploaded"}-${item.documentType}-${item.id}`}>
                   <div className="document-icon"><FileText size={17} /></div>
                   <div>
                     <strong>{item.fileName}</strong>
-                    <span>{documentTypeLabel(item.documentType)} · {Math.ceil(item.sizeBytes / 1024)} KB</span>
+                    <span>{documentTypeLabel(item.documentType)} · {item.downloadKind ? "Generated artifact" : `${Math.ceil(item.sizeBytes / 1024)} KB`}</span>
                   </div>
                   <button className="text-link" onClick={() => download(item)}>
                     Open <ArrowUpRight size={14} />
                   </button>
-                </div>
-              ))}
+              </div>
+            ))}
             </div>
+            {paginate && totalPages > 1 && (
+              <PaginationControls
+                page={page}
+                totalPages={totalPages}
+                total={displayedDocuments.length}
+                onPageChange={setPage}
+              />
+            )}
           </details>
         ) : (
           <div className="document-list">
-            {displayedDocuments.map((item) => (
-              <div className="document-row" key={item.id}>
+            {pagedDocuments.map((item) => (
+              <div className="document-row" key={`document-${item.downloadKind ?? "uploaded"}-${item.documentType}-${item.id}`}>
                 <div className="document-icon"><FileText size={17} /></div>
                 <div>
                   <strong>{item.fileName}</strong>
-                  <span>{documentTypeLabel(item.documentType)} · {Math.ceil(item.sizeBytes / 1024)} KB · {statusLabel(item.status)}</span>
+                  <span>{documentTypeLabel(item.documentType)} · {item.downloadKind ? "Generated artifact" : `${Math.ceil(item.sizeBytes / 1024)} KB`} · {statusLabel(item.status)}</span>
                 </div>
                 <button className="text-link" onClick={() => download(item)}>
                   View <ArrowUpRight size={14} />
                 </button>
               </div>
             ))}
+            {paginate && totalPages > 1 && (
+              <PaginationControls
+                page={page}
+                totalPages={totalPages}
+                total={displayedDocuments.length}
+                onPageChange={setPage}
+              />
+            )}
           </div>
         )
       ) : hideEmptyState ? null : (
@@ -5805,9 +6704,13 @@ function DocumentsPanel({
               : fixedDocumentType === "BALANCE_PAYMENT_RECEIPT"
                 ? "Attach the receipt or bank confirmation for this balance payment before Finance verification."
               : fixedDocumentType === "FLOOR_PLAN"
-                ? "Upload the floor plan required before the contract is submitted for GM review."
+                ? contractSigningMethod === "Manual"
+                  ? "Upload the floor plan required before proceeding to pre-launch."
+                  : "Upload the floor plan required before the contract is submitted for GM review."
               : fixedDocumentType === "PERSPECTIVE"
-                ? "Upload the site perspective required before the contract is submitted for GM review."
+                ? contractSigningMethod === "Manual"
+                  ? "Upload the site perspective required before proceeding to pre-launch."
+                  : "Upload the site perspective required before the contract is submitted for GM review."
                 : fixedDocumentType
                   ? `Upload the ${documentTypeLabel(fixedDocumentType)} required for this pre-launch requirement.`
                   : "Upload one scanned file containing the valid ID and three specimen signatures before Finance confirms payment."
@@ -5996,6 +6899,8 @@ function ContractPanel({
   const [drCareEmail, setDrCareEmail] = useState(session.user?.email ?? "");
   const [signingRequests, setSigningRequests] = useState<SigningRequest[]>([]);
   const [signingLinks, setSigningLinks] = useState<Record<string, string>>({});
+  const [manualPreLaunchOpen, setManualPreLaunchOpen] = useState(false);
+  const [nurseOrDoctorAvailable, setNurseOrDoctorAvailable] = useState(false);
   const [busy, setBusy] = useState(false);
   const canDraft = hasRole(session.user?.role, ["SalesAgent", "GeneralManager"]);
   const canReview = hasRole(session.user?.role, ["GeneralManager"]);
@@ -6153,10 +7058,27 @@ function ContractPanel({
       "Contract sent for review.",
     );
   };
+  const selectSigningMethod = (method: "Electronic" | "Manual") => {
+    if (!contract || method === (contract.signingMethod === "Manual" ? "Manual" : "Electronic")) return;
+    return run(
+      () => api.leads.selectContractSigningMethod(lead.id, { signingMethod: method, expectedVersion: lead.version }),
+      method === "Manual" ? "Face-to-face signing selected." : "Electronic signing selected.",
+    );
+  };
+  const proceedWithManualSigning = () => {
+    if (!contract || contract.signingMethod !== "Manual") return;
+    return run(async () => {
+      await api.leads.initializePreLaunch(lead.id, nurseOrDoctorAvailable, false, true, lead.version);
+      setManualPreLaunchOpen(false);
+    }, "Manual signing confirmed and pre-launch started.");
+  };
   const activeFranchiseeRequest = signingRequests.find((item) => item.signerRole === "franchisee" && ["Pending", "Viewed"].includes(item.status));
   const activeDrCareRequest = signingRequests.find((item) => item.signerRole === "dr-care" && ["Pending", "Viewed"].includes(item.status));
   const drCareEmailUnreachable = drCareEmail.trim().toLowerCase().endsWith(".local");
-  const requiredContractDocuments = ["FLOOR_PLAN", "PERSPECTIVE"];
+  const manualSigning = contract?.signingMethod === "Manual";
+  const requiredContractDocuments = manualSigning
+    ? ["FLOOR_PLAN", "PERSPECTIVE", "SIGNED_CONTRACT"]
+    : ["FLOOR_PLAN", "PERSPECTIVE"];
   const uploadedContractDocuments = requiredContractDocuments.filter((type) => contractDocuments.some((item) => item.documentType === type && item.status === "Uploaded"));
   const contractDocumentsComplete = uploadedContractDocuments.length === requiredContractDocuments.length;
   const contractPrerequisites = [
@@ -6184,20 +7106,28 @@ function ContractPanel({
         {contract && (
           <>
           {(() => {
-            const lifecycleStep = contract.status === "RevisionRequested"
-              ? 2
-              : contract.status === "InReview"
+            const lifecycleStep = manualSigning
+              ? contract.status === "Signed"
                 ? 3
-                : contract.status === "Signed"
-                  ? 5
-                  : contract.status === "Approved"
-                    ? 4
-                  : contractDocumentsComplete
-                    ? 1
-                    : 0;
-            const lifecycleLabels = contract.status === "RevisionRequested"
-              ? ["Draft created", "Documents ready", "Returned for revision", "Resubmit review", "E-signing"]
-              : ["Draft created", "Documents ready", "GM review", "Review outcome", "E-signing"];
+                : contractDocumentsComplete
+                  ? 2
+                  : 1
+              : contract.status === "RevisionRequested"
+                ? 2
+                : contract.status === "InReview"
+                  ? 3
+                  : contract.status === "Signed"
+                    ? 5
+                    : contract.status === "Approved"
+                      ? 4
+                      : contractDocumentsComplete
+                        ? 1
+                        : 0;
+            const lifecycleLabels = manualSigning
+              ? ["Draft created", "Documents ready", "Manual signing", "Pre-launch"]
+              : contract.status === "RevisionRequested"
+                ? ["Draft created", "Documents ready", "Returned for revision", "Resubmit review", "E-signing"]
+                : ["Draft created", "Documents ready", "GM review", "Review outcome", "E-signing"];
             return (
               <div className="contract-lifecycle-stepper" aria-label="Contract progress">
                 {lifecycleLabels.map((label, index) => (
@@ -6282,16 +7212,12 @@ function ContractPanel({
             <div className="inline-form">
               <label>
                 Contract template
-                <select
+                <BrandedSelect
                   value={template}
-                  onChange={(e) => setTemplate(e.target.value)}
-                >
-                  {contractTemplateOptions.map((option) => (
-                    <option value={option.code} key={option.code}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
+                  onChange={setTemplate}
+                  ariaLabel="Contract template"
+                  options={contractTemplateOptions.map((option) => ({ value: option.code, label: option.label }))}
+                />
               </label>
               <button
                 className="button button-primary"
@@ -6321,15 +7247,39 @@ function ContractPanel({
         )}
         {contract && (
           <>
+            {canEditDraft && ["Draft", "RevisionRequested"].includes(contract.status) && (
+              <div className="contract-signing-method-card">
+                <div>
+                  <strong>Signing method</strong>
+                  <span>Choose how this agreement will be completed. This choice is locked once review or signing begins.</span>
+                </div>
+                <BrandedSelect
+                  value={manualSigning ? "Manual" : "Electronic"}
+                  onChange={(value) => void selectSigningMethod(value as "Electronic" | "Manual")}
+                  disabled={busy}
+                  ariaLabel="Contract signing method"
+                  options={[
+                    { value: "Electronic", label: "Electronic signature" },
+                    { value: "Manual", label: "Face-to-face signing" },
+                  ]}
+                />
+              </div>
+            )}
             <details className="contract-workflow-disclosure">
               <summary>
                 <span><CircleHelp size={15} /> <strong>How contract review works</strong></span>
-                <span className="contract-workflow-steps">1) Draft and submit · 2) GM reviews · 3) Secure e-signing <ChevronDown size={15} /></span>
+                <span className="contract-workflow-steps">{manualSigning ? "1) Draft · 2) Upload signed documents · 3) Proceed to pre-launch" : "1) Draft and submit · 2) GM reviews · 3) Secure e-signing"} <ChevronDown size={15} /></span>
               </summary>
               <div className="contract-workflow-details">
-                <span>1. Sales Agent drafts the agreement and submits it for review.</span>
-                <span>2. The General Manager completes the review checklist and approves or requests revisions.</span>
-                <span>3. The Sales Agent creates secure e-signing links for both parties.</span>
+                {manualSigning ? <>
+                  <span>1. The Sales Agent uploads the floor plan, perspective, and scanned signed contract.</span>
+                  <span>2. The General Manager review is bypassed for face-to-face signing.</span>
+                  <span>3. An authorized user explicitly confirms the documents before starting pre-launch.</span>
+                </> : <>
+                  <span>1. Sales Agent drafts the agreement and submits it for review.</span>
+                  <span>2. The General Manager completes the review checklist and approves or requests revisions.</span>
+                  <span>3. The Sales Agent creates secure e-signing links for both parties.</span>
+                </>}
               </div>
             </details>
             {contract.status === "RevisionRequested" && (
@@ -6358,15 +7308,15 @@ function ContractPanel({
               <div className="contract-supporting-documents">
                 <div className="contract-section-heading">
                   <div>
-                    <strong>Required drafting documents</strong>
-                    <span>Upload both files before submitting the agreement for GM review.</span>
+                    <strong>{manualSigning ? "Required manual signing documents" : "Required drafting documents"}</strong>
+                    <span>{manualSigning ? "Upload all three files before proceeding to pre-launch." : "Upload both files before submitting the agreement for GM review."}</span>
                   </div>
                   <strong className="contract-completion-count">
                     {contractDocumentsComplete ? <CheckCircle2 size={15} /> : <span className="contract-count-dot" />}
                     {uploadedContractDocuments.length} of {requiredContractDocuments.length} complete
                   </strong>
                 </div>
-                <div className="contract-document-grid">
+                <div className={`contract-document-grid ${manualSigning ? "manual" : ""}`}>
                   <div>
                     <div className={`contract-document-label ${uploadedContractDocuments.includes("FLOOR_PLAN") ? "complete" : "pending"}`}>
                       {uploadedContractDocuments.includes("FLOOR_PLAN") ? <CheckCircle2 size={15} /> : <span className="contract-check-pending" />} <strong>Floor plan</strong>
@@ -6378,6 +7328,7 @@ function ContractPanel({
                       embedded
                       fixedDocumentType="FLOOR_PLAN"
                       visibleTypes={["FLOOR_PLAN"]}
+                      contractSigningMethod={manualSigning ? "Manual" : "Electronic"}
                       compactAfterUpload
                       documentCard
                     />
@@ -6393,14 +7344,57 @@ function ContractPanel({
                       embedded
                       fixedDocumentType="PERSPECTIVE"
                       visibleTypes={["PERSPECTIVE"]}
+                      contractSigningMethod={manualSigning ? "Manual" : "Electronic"}
                       compactAfterUpload
                       documentCard
                     />
                   </div>
+                  {manualSigning && (
+                    <div>
+                      <div className={`contract-document-label ${uploadedContractDocuments.includes("SIGNED_CONTRACT") ? "complete" : "pending"}`}>
+                        {uploadedContractDocuments.includes("SIGNED_CONTRACT") ? <CheckCircle2 size={15} /> : <span className="contract-check-pending" />} <strong>Scanned signed contract</strong>
+                      </div>
+                      <DocumentsPanel
+                        lead={lead}
+                        onNotice={onNotice}
+                        onDocumentsChanged={reload}
+                        embedded
+                        fixedDocumentType="SIGNED_CONTRACT"
+                        visibleTypes={["SIGNED_CONTRACT"]}
+                        contractSigningMethod="Manual"
+                        compactAfterUpload
+                        documentCard
+                      />
+                    </div>
+                  )}
                 </div>
               </div>
             )}
-            {canEditDraft && ["Draft", "RevisionRequested"].includes(contract.status) && (
+            {canEditDraft && manualSigning && ["Draft", "RevisionRequested"].includes(contract.status) && (
+              <div className="contract-review-submit-card manual-prelaunch-card">
+                <div className="contract-review-submit-heading">
+                  <div>
+                    <strong>Ready to proceed to Pre-launch</strong>
+                    <span>GM review is bypassed for face-to-face signing. Confirm only after the physically signed contract has been scanned and uploaded.</span>
+                  </div>
+                </div>
+                <div className="contract-review-submit-body">
+                  <div className="contract-review-checks">
+                    <span className={uploadedContractDocuments.includes("FLOOR_PLAN") ? "" : "pending"}>{uploadedContractDocuments.includes("FLOOR_PLAN") ? <CheckCircle2 size={15} /> : <span className="contract-check-pending" />} Floor plan {uploadedContractDocuments.includes("FLOOR_PLAN") ? "uploaded" : "pending"}</span>
+                    <span className={uploadedContractDocuments.includes("PERSPECTIVE") ? "" : "pending"}>{uploadedContractDocuments.includes("PERSPECTIVE") ? <CheckCircle2 size={15} /> : <span className="contract-check-pending" />} Perspective {uploadedContractDocuments.includes("PERSPECTIVE") ? "uploaded" : "pending"}</span>
+                    <span className={uploadedContractDocuments.includes("SIGNED_CONTRACT") ? "" : "pending"}>{uploadedContractDocuments.includes("SIGNED_CONTRACT") ? <CheckCircle2 size={15} /> : <span className="contract-check-pending" />} Scanned signed contract {uploadedContractDocuments.includes("SIGNED_CONTRACT") ? "uploaded" : "pending"}</span>
+                  </div>
+                  <p className="manual-prelaunch-warning">This action is explicit and will start the product-specific pre-launch checklist. The uploaded signed contract will be retained in the Documents tab and recorded in the audit history.</p>
+                </div>
+                <div className="contract-review-submit-actions">
+                  <span><ShieldCheck size={14} /> Required documents are checked again by the server</span>
+                  <button className="button button-primary" disabled={busy || !contractDocumentsComplete} onClick={() => setManualPreLaunchOpen(true)}>
+                    Proceed to Pre-launch <ChevronRight size={15} />
+                  </button>
+                </div>
+              </div>
+            )}
+            {canEditDraft && !manualSigning && ["Draft", "RevisionRequested"].includes(contract.status) && (
               <div className="contract-review-submit-card">
                 <div className="contract-review-submit-heading">
                   <div>
@@ -6629,7 +7623,7 @@ function ContractPanel({
             )}
             {contract.status === "Signed" && (
               <div className="read-only-note">
-                <CheckCircle2 size={16} /> Both parties have signed. The
+                <CheckCircle2 size={16} /> {manualSigning ? "The face-to-face signed contract is recorded." : "Both parties have signed."} The
                 pre-launch checklist can now be started.
               </div>
             )}
@@ -6642,6 +7636,28 @@ function ContractPanel({
           </>
         )}
       </div>
+      {manualPreLaunchOpen && contract?.signingMethod === "Manual" && (
+        <Modal
+          title="Proceed to Pre-launch?"
+          subtitle="This confirms the face-to-face signed contract and starts the pre-launch checklist."
+          onClose={() => { if (!busy) setManualPreLaunchOpen(false); }}
+        >
+          <div className="manual-prelaunch-confirmation">
+            <div className="callout">
+              The floor plan, perspective, and scanned signed contract are uploaded. GM review will be bypassed for this contract.
+            </div>
+            <label className="signature-consent">
+              <input type="checkbox" checked={nurseOrDoctorAvailable} onChange={(event) => setNurseOrDoctorAvailable(event.target.checked)} />
+              A nurse or doctor is available for animal-bite training.
+            </label>
+            <p className="muted">The action is audited and cannot be undone from this workflow. You can still manage the resulting pre-launch checklist.</p>
+            <div className="form-actions">
+              <button type="button" className="button button-secondary" onClick={() => setManualPreLaunchOpen(false)} disabled={busy}>Cancel</button>
+              <button type="button" className="button button-primary" onClick={() => void proceedWithManualSigning()} disabled={busy}>{busy ? "Starting…" : "Confirm and proceed"}</button>
+            </div>
+          </div>
+        </Modal>
+      )}
     </section>
   );
 }
@@ -6705,12 +7721,10 @@ function PreLaunchDocumentRequirement({
   lead,
   item,
   onNotice,
-  onDocumentsChanged,
 }: {
   lead: Lead;
   item: PreLaunchChecklistItem;
   onNotice: (notice: Notice) => void;
-  onDocumentsChanged?: () => Promise<void>;
 }) {
   const [documents, setDocuments] = useState<DocumentItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -6732,13 +7746,17 @@ function PreLaunchDocumentRequirement({
       setLoading(false);
     }
   };
+  const handleDocumentsChanged = async (updatedDocuments?: DocumentItem[]) => {
+    if (updatedDocuments) {
+      setDocuments(updatedDocuments);
+      setLoading(false);
+      return;
+    }
+    await reload();
+  };
   useEffect(() => {
     void reload();
   }, [lead.id, documentType]);
-  const handleDocumentsChanged = async () => {
-    await reload();
-    await onDocumentsChanged?.();
-  };
   const statusLabel = loading
     ? "Checking file status…"
     : uploadedDocuments.length
@@ -6795,6 +7813,7 @@ function PreLaunchPanel({
     items: PreLaunchChecklistItem[];
   } | null>(null);
   const [busy, setBusy] = useState(false);
+  const [busyItemId, setBusyItemId] = useState<string | null>(null);
   const [nurseOrDoctorAvailable, setNurseOrDoctorAvailable] = useState(false);
   const [signedContractReviewed, setSignedContractReviewed] = useState(false);
   const [filter, setFilter] = useState<PreLaunchFilter>("all");
@@ -6852,17 +7871,20 @@ function PreLaunchPanel({
     }
   };
   const toggle = async (item: { id: string; complete: boolean }) => {
+    if (busyItemId) return;
+    setBusyItemId(item.id);
     try {
-      await api.leads.updatePreLaunchItem(lead.id, item.id, {
+      const updated = await api.leads.updatePreLaunchItem(lead.id, item.id, {
         complete: !item.complete,
-      });
-      await reload();
-      await onReload();
+      }) as { status: string; items: PreLaunchChecklistItem[] };
+      setChecklist(updated);
     } catch (e) {
       onNotice({
         message: errorMessage(e, "Unable to update checklist item."),
         tone: "error",
       });
+    } finally {
+      setBusyItemId(null);
     }
   };
   const complete = async () => {
@@ -7077,7 +8099,7 @@ function PreLaunchPanel({
                       <div className="prelaunch-category-items">
                         {category.items.map((item) => {
                           const meta = preLaunchItemMeta(item, category.label);
-                          const canToggle = canComplete && checklist.status.toUpperCase() !== "COMPLETED" && !item.paused;
+                          const canToggle = canComplete && checklist.status.toUpperCase() !== "COMPLETED" && !item.paused && !busyItemId;
                           return (
                             <div
                               className={`prelaunch-item ${item.complete ? "complete" : ""} ${item.paused ? "blocked" : ""}`}
@@ -7107,9 +8129,6 @@ function PreLaunchPanel({
                                   lead={lead}
                                   item={item}
                                   onNotice={onNotice}
-                                  onDocumentsChanged={async () => {
-                                    await reload();
-                                  }}
                                 />
                               )}
                             </div>
@@ -7495,7 +8514,516 @@ function AuditPanel({ leadId }: { leadId: string }) {
 function Tasks({ user }: { user: NonNullable<typeof session.user> }) {
   if (!hasRole(user.role, taskReadRoles))
     return <Navigate to="/" replace />;
-  return <TasksContent user={user} />;
+  return <WorkQueueContent user={user} />;
+}
+
+type WorkQueueQuickFilter = "all" | "review" | "today" | "overdue" | "unscheduled";
+type WorkQueueItem = {
+  task: Task;
+  lead?: Lead;
+  deletionRequest?: LeadDeletionRequest;
+  completed?: CompletedWorkItem;
+};
+
+function WorkQueueContent({
+  user,
+}: {
+  user: NonNullable<typeof session.user>;
+}) {
+  const realtimeRevision = useRealtimeRefresh();
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [completedWork, setCompletedWork] = useState<CompletedWorkItem[]>([]);
+  const [completedPage, setCompletedPage] = useState(1);
+  const [completedTotal, setCompletedTotal] = useState(0);
+  const [completedPageBusy, setCompletedPageBusy] = useState(false);
+  const [completedAllLoaded, setCompletedAllLoaded] = useState(false);
+  const [completedSearchLoading, setCompletedSearchLoading] = useState(false);
+  const completedSearchLoadingRef = useRef(false);
+  const [leads, setLeads] = useState<Lead[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [view, setView] = useState<"todo" | "completed">("todo");
+  const [notice, setNotice] = useState<Notice | null>(null);
+  const [deletionRequests, setDeletionRequests] = useState<LeadDeletionRequest[]>([]);
+  const [search, setSearch] = useState("");
+  const [typeFilter, setTypeFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [dueFilter, setDueFilter] = useState("all");
+  const [sortBy, setSortBy] = useState("attention");
+  const [quickFilter, setQuickFilter] = useState<WorkQueueQuickFilter>("all");
+  const [page, setPage] = useState(1);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [deletionDialog, setDeletionDialog] = useState<"approve" | "reject" | null>(null);
+  const [deletionBusy, setDeletionBusy] = useState(false);
+  const drawerCloseRef = useRef<HTMLButtonElement>(null);
+  const canManageTasks = hasRole(user.role, marketingWriteRoles);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const [nextTasks, nextCompletedWork, nextLeads, nextDeletionRequests] = await Promise.all([
+        api.tasks.list(),
+        api.tasks.completed(1),
+        api.leads.listAll("?limit=100&sort=updatedAt"),
+        hasRole(user.role, ["GeneralManager"])
+          ? api.leads.deletionRequests().catch(() => [] as LeadDeletionRequest[])
+          : Promise.resolve([] as LeadDeletionRequest[]),
+      ]);
+      setTasks(nextTasks);
+      setCompletedWork(nextCompletedWork.items);
+      setCompletedPage(nextCompletedWork.page);
+      setCompletedTotal(nextCompletedWork.total);
+      setCompletedAllLoaded(false);
+      setLeads(nextLeads.items);
+      setDeletionRequests(nextDeletionRequests);
+    } catch (e) {
+      setNotice({
+        message: errorMessage(e, "Unable to load tasks."),
+        tone: "error",
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void load();
+  }, [realtimeRevision, user.id, user.role]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [search, typeFilter, statusFilter, dueFilter, sortBy, quickFilter, view]);
+
+  useEffect(() => {
+    if (!selectedId) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setSelectedId(null);
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [selectedId]);
+
+  useEffect(() => {
+    if (selectedId) drawerCloseRef.current?.focus();
+  }, [selectedId]);
+
+  const loadCompletedPage = async (nextPage: number) => {
+    if (completedAllLoaded) {
+      setCompletedPage(nextPage);
+      return;
+    }
+    if (completedPageBusy) return;
+    setCompletedPageBusy(true);
+    try {
+      const response = await api.tasks.completed(nextPage);
+      setCompletedWork(response.items);
+      setCompletedPage(response.page);
+      setCompletedTotal(response.total);
+      setCompletedAllLoaded(false);
+    } catch (e) {
+      setNotice({
+        message: errorMessage(e, "Unable to load completed work."),
+        tone: "error",
+      });
+    } finally {
+      setCompletedPageBusy(false);
+    }
+  };
+
+  const loadAllCompleted = async () => {
+    if (completedSearchLoadingRef.current) return;
+    completedSearchLoadingRef.current = true;
+    setCompletedSearchLoading(true);
+    setCompletedPageBusy(true);
+    try {
+      const firstPage = await api.tasks.completed(1);
+      const allItems = [...firstPage.items];
+      const totalPages = Math.max(1, Math.ceil(firstPage.total / firstPage.pageSize));
+      for (let nextPage = 2; nextPage <= totalPages; nextPage += 1) {
+        const response = await api.tasks.completed(nextPage);
+        allItems.push(...response.items);
+      }
+      setCompletedWork(allItems);
+      setCompletedPage(1);
+      setCompletedTotal(firstPage.total);
+      setCompletedAllLoaded(true);
+    } catch (e) {
+      setNotice({
+        message: errorMessage(e, "Unable to search completed work."),
+        tone: "error",
+      });
+    } finally {
+      completedSearchLoadingRef.current = false;
+      setCompletedSearchLoading(false);
+      setCompletedPageBusy(false);
+    }
+  };
+
+  useEffect(() => {
+    if (view !== "completed" || !search.trim() || completedAllLoaded) return;
+    const timer = window.setTimeout(() => void loadAllCompleted(), 250);
+    return () => window.clearTimeout(timer);
+  }, [view, search, completedAllLoaded]);
+
+  const complete = async (task: Task) => {
+    try {
+      await api.tasks.complete(task.id, {});
+      setSelectedId(null);
+      await load();
+      setNotice({ message: "Task completed.", tone: "success" });
+    } catch (e) {
+      setNotice({
+        message: errorMessage(e, "Unable to complete the task."),
+        tone: "error",
+      });
+    }
+  };
+
+  const create = async (payload: unknown) => {
+    try {
+      await api.tasks.create(payload);
+      setCreateOpen(false);
+      await load();
+      setNotice({ message: "Task created.", tone: "success" });
+    } catch (e) {
+      setNotice({
+        message: errorMessage(e, "Unable to create task."),
+        tone: "error",
+      });
+    }
+  };
+
+  const submitDeletion = async (reason?: string) => {
+    const selected = selectedId
+      ? deletionRequests.find((request) => `deletion:${request.id}` === selectedId)
+      : undefined;
+    if (!selected || !deletionDialog) return;
+    setDeletionBusy(true);
+    try {
+      if (deletionDialog === "approve") {
+        await api.leads.approveDeletion(selected.leadId);
+        setNotice({ message: "Lead deletion approved and completed.", tone: "success" });
+      } else {
+        await api.leads.rejectDeletion(selected.leadId, { reason: reason?.trim() ?? "" });
+        setNotice({ message: "Deletion request rejected.", tone: "success" });
+      }
+      setDeletionDialog(null);
+      setSelectedId(null);
+      await load();
+    } catch (e) {
+      setNotice({
+        message: errorMessage(e, "Unable to update the deletion request."),
+        tone: "error",
+      });
+    } finally {
+      setDeletionBusy(false);
+    }
+  };
+
+  const leadById = new Map(leads.map((lead) => [lead.id, lead]));
+  const persistedOpenTasks = tasks.filter((task) => task.status === "Open");
+  const persistedLeadIds = new Set(persistedOpenTasks.map((task) => task.leadId));
+  const workflowDueAt = new Date();
+  workflowDueAt.setHours(23, 59, 59, 999);
+  const workflowTasks: Task[] = leads
+    .filter((lead) => isMyCurrentAction(lead, user) && !persistedLeadIds.has(lead.id))
+    .map((lead) => ({
+      id: `workflow:${lead.id}`,
+      leadId: lead.id,
+      assignedTo: user.id,
+      title: nextStepForLead(lead, Boolean(lead.downPaymentSubmittedForFinance)).label,
+      status: "Open" as const,
+      createdAt: lead.updatedAt,
+      dueAt: workflowDueAt.toISOString(),
+    }));
+  const deletionByTaskId = new Map(
+    deletionRequests.map((request) => [`deletion:${request.id}`, request]),
+  );
+  const deletionTasks: Task[] = deletionRequests.map((request) => ({
+    id: `deletion:${request.id}`,
+    leadId: request.leadId,
+    assignedTo: user.id,
+    title: "Review lead deletion",
+    status: "Open",
+    createdAt: request.requestedAt,
+    dueAt: null,
+  }));
+  const openItems: WorkQueueItem[] = [...persistedOpenTasks, ...workflowTasks, ...deletionTasks].map((task) => ({
+    task,
+    lead: leadById.get(task.leadId),
+    deletionRequest: deletionByTaskId.get(task.id),
+  }));
+  const completedItems: WorkQueueItem[] = completedWork.map((item) => ({
+    task: {
+      id: `completed:${item.kind}:${item.id}`,
+      leadId: item.leadId,
+      assignedTo: user.id,
+      title: item.title,
+      status: "Completed",
+      createdAt: item.completedAt,
+      dueAt: null,
+    },
+    lead: leadById.get(item.leadId),
+    completed: item,
+  }));
+
+  const summary = {
+    open: openItems.length,
+    review: deletionTasks.length,
+    today: openItems.filter(({ task }) => taskDueState(task) === "today").length,
+    overdue: openItems.filter(({ task }) => taskDueState(task) === "overdue").length,
+    unscheduled: openItems.filter(({ task }) => taskDueState(task) === "unscheduled").length,
+  };
+  const filterActive = Boolean(search.trim()) || sortBy !== "attention" || (view === "todo" && (typeFilter !== "all" || statusFilter !== "all" || dueFilter !== "all" || quickFilter !== "all"));
+  const filteredOpenItems = openItems
+    .filter((item) => {
+      const text = workQueueSearchText(item).toLowerCase();
+      const type = workQueueType(item);
+      const status = workQueueStatus(item);
+      const dueState = taskDueState(item.task);
+      const quickMatch =
+        quickFilter === "all" ||
+        (quickFilter === "review" && Boolean(item.deletionRequest)) ||
+        (quickFilter === "today" && dueState === "today") ||
+        (quickFilter === "overdue" && dueState === "overdue") ||
+        (quickFilter === "unscheduled" && dueState === "unscheduled");
+      return (
+        (!search.trim() || text.includes(search.trim().toLowerCase())) &&
+        (typeFilter === "all" || type === typeFilter) &&
+        (statusFilter === "all" || status === statusFilter) &&
+        (dueFilter === "all" || dueState === dueFilter) &&
+        quickMatch
+      );
+    })
+    .sort((a, b) => sortWorkQueueItems(a, b, sortBy));
+  const openTotalPages = Math.max(1, Math.ceil(filteredOpenItems.length / 10));
+  const visibleOpenItems = filteredOpenItems.slice((page - 1) * 10, page * 10);
+  const filteredCompletedItems = completedItems
+    .filter((item) => !search.trim() || workQueueSearchText(item).toLowerCase().includes(search.trim().toLowerCase()))
+    .sort((a, b) => sortWorkQueueItems(a, b, sortBy));
+  const completedTotalForView = completedAllLoaded ? filteredCompletedItems.length : completedTotal;
+  const visibleCompletedItems = completedAllLoaded
+    ? filteredCompletedItems.slice((completedPage - 1) * 10, completedPage * 10)
+    : filteredCompletedItems;
+  const completedTotalPages = Math.max(1, Math.ceil(completedTotalForView / 10));
+  const selectedItem = [...openItems, ...completedItems].find((item) => workQueueItemId(item) === selectedId);
+  const selectedDeletionLead = selectedItem?.deletionRequest
+    ? selectedItem.lead ?? ({
+        id: selectedItem.deletionRequest.leadId,
+        fullName: selectedItem.deletionRequest.leadName,
+        email: selectedItem.deletionRequest.leadEmail,
+        state: selectedItem.deletionRequest.leadState,
+        deletionReason: selectedItem.deletionRequest.reason,
+      } as Lead)
+    : undefined;
+
+  const clearFilters = () => {
+    setSearch("");
+    setTypeFilter("all");
+    setStatusFilter("all");
+    setDueFilter("all");
+    setSortBy("attention");
+    setQuickFilter("all");
+  };
+  const chooseSummary = (filter: WorkQueueQuickFilter) => {
+    setView("todo");
+    setTypeFilter("all");
+    setStatusFilter("all");
+    setDueFilter("all");
+    setSortBy("attention");
+    setQuickFilter((current) => current === filter ? "all" : filter);
+    setPage(1);
+  };
+  const chooseView = (nextView: "todo" | "completed") => {
+    setView(nextView);
+    setPage(1);
+    if (nextView === "completed") {
+      setTypeFilter("all");
+      setStatusFilter("all");
+      setDueFilter("all");
+      setQuickFilter("all");
+    }
+  };
+  const changeToolbar = (setter: (value: string) => void, value: string) => {
+    setter(value);
+    setQuickFilter("all");
+    setPage(1);
+  };
+
+  return (
+    <Page
+      title="My work queue"
+      subtitle="Everything assigned to you that needs attention, plus your completed work history."
+      actions={canManageTasks ? <button className="button button-secondary" onClick={() => setCreateOpen(true)}><Plus size={17} /> Add task</button> : undefined}
+    >
+      {notice && <NoticeBar notice={notice} onClose={() => setNotice(null)} />}
+      <div className="work-queue-summary" aria-label="Queue summary">
+        <WorkQueueSummaryCard label="Open" count={summary.open} icon={ListChecks} tone="blue" active={quickFilter === "all" && view === "todo" && !filterActive} onClick={() => { setView("todo"); clearFilters(); }} />
+        <WorkQueueSummaryCard label="Needs review" count={summary.review} icon={ShieldCheck} tone="amber" active={quickFilter === "review"} onClick={() => chooseSummary("review")} />
+        <WorkQueueSummaryCard label="Due today" count={summary.today} icon={CalendarDays} tone="green" active={quickFilter === "today"} onClick={() => chooseSummary("today")} />
+        <WorkQueueSummaryCard label="Overdue" count={summary.overdue} icon={AlertTriangle} tone="red" active={quickFilter === "overdue"} onClick={() => chooseSummary("overdue")} />
+        <WorkQueueSummaryCard label="Unscheduled" count={summary.unscheduled} icon={Clock3} tone="purple" active={quickFilter === "unscheduled"} onClick={() => chooseSummary("unscheduled")} />
+      </div>
+      <div className="queue-view-tabs" role="tablist" aria-label="Task status">
+        <button role="tab" aria-selected={view === "todo"} className={view === "todo" ? "active" : ""} onClick={() => chooseView("todo")}>Open <span>{summary.open}</span></button>
+        <button role="tab" aria-selected={view === "completed"} className={view === "completed" ? "active" : ""} onClick={() => chooseView("completed")}>Completed <span>{completedTotal}</span></button>
+      </div>
+      <div className="work-queue-toolbar" aria-label="Task filters">
+        <label className="work-queue-search"><Search size={16} /><span className="sr-only">Search tasks</span><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search tasks…" /></label>
+        <label><span className="sr-only">Type</span><BrandedSelect value={typeFilter} disabled={view === "completed"} onChange={(value) => changeToolbar(setTypeFilter, value)} ariaLabel="Type" options={[{ value: "all", label: "Type" }, { value: "approval", label: "Approval" }, { value: "contract", label: "Contract" }, { value: "finance", label: "Finance" }, { value: "inquiry", label: "Inquiry" }, { value: "workflow", label: "Workflow" }, { value: "task", label: "Task" }]} /></label>
+        <label><span className="sr-only">Status</span><BrandedSelect value={statusFilter} disabled={view === "completed"} onChange={(value) => changeToolbar(setStatusFilter, value)} ariaLabel="Status" options={[{ value: "all", label: "Status" }, { value: "Pending GM review", label: "Pending GM review" }, { value: "Needs action", label: "Needs action" }, { value: "Open", label: "Open" }, { value: "Overdue", label: "Overdue" }]} /></label>
+        <label><span className="sr-only">Due date</span><BrandedSelect value={dueFilter} disabled={view === "completed"} onChange={(value) => changeToolbar(setDueFilter, value)} ariaLabel="Due date" options={[{ value: "all", label: "Due date" }, { value: "today", label: "Due today" }, { value: "overdue", label: "Overdue" }, { value: "upcoming", label: "Upcoming" }, { value: "unscheduled", label: "Unscheduled" }]} /></label>
+        <label><span className="sr-only">Sort by</span><BrandedSelect value={sortBy} onChange={(value) => changeToolbar(setSortBy, value)} ariaLabel="Sort by" options={[{ value: "attention", label: "Sort by: Attention" }, { value: "dueAsc", label: "Due date: earliest" }, { value: "dueDesc", label: "Due date: latest" }, { value: "recent", label: "Recently created" }, { value: "oldest", label: "Oldest" }]} /></label>
+        {filterActive && <button type="button" className="text-link work-queue-clear" onClick={clearFilters}>Clear filters</button>}
+      </div>
+      <div className="work-queue-layout">
+        <section className="panel work-queue-table-panel" aria-label={view === "todo" ? "Open tasks" : "Completed tasks"}>
+          {loading || completedSearchLoading ? <WorkQueueSkeleton /> : view === "completed" ? (
+            visibleCompletedItems.length ? <>
+              <WorkQueueTableHeader completed />
+              <div className="work-queue-rows">{visibleCompletedItems.map((item) => <WorkQueueRow key={workQueueItemId(item)} item={item} selected={selectedId === workQueueItemId(item)} onSelect={() => setSelectedId(workQueueItemId(item))} />)}</div>
+              {completedTotalPages > 1 && <PaginationControls page={completedPage} totalPages={completedTotalPages} total={completedTotalForView} busy={completedPageBusy} onPageChange={loadCompletedPage} />}
+            </> : <WorkQueueEmpty filtered={Boolean(search.trim())} onClear={clearFilters} completed />
+          ) : filteredOpenItems.length ? <>
+            <WorkQueueTableHeader />
+            <div className="work-queue-rows">{visibleOpenItems.map((item) => <WorkQueueRow key={workQueueItemId(item)} item={item} selected={selectedId === workQueueItemId(item)} onSelect={() => setSelectedId(workQueueItemId(item))} />)}</div>
+            {openTotalPages > 1 && <PaginationControls page={page} totalPages={openTotalPages} total={filteredOpenItems.length} onPageChange={setPage} />}
+          </> : <WorkQueueEmpty filtered={filterActive} onClear={clearFilters} />}
+        </section>
+        {selectedItem && <WorkQueueDrawer item={selectedItem} user={user} closeRef={drawerCloseRef} onClose={() => setSelectedId(null)} onComplete={complete} onDeletionAction={setDeletionDialog} />}
+      </div>
+      {createOpen && <Modal title="Add task" subtitle="Give the work a clear outcome and due date." onClose={() => setCreateOpen(false)}><TaskForm onSubmit={create} submitLabel="Add task" /></Modal>}
+      {deletionDialog && selectedDeletionLead && <LeadDeletionDialog mode={deletionDialog} lead={selectedDeletionLead} busy={deletionBusy} onClose={() => { if (!deletionBusy) setDeletionDialog(null); }} onSubmit={submitDeletion} />}
+    </Page>
+  );
+}
+
+function WorkQueueSummaryCard({
+  label,
+  count,
+  icon: IconComponent,
+  tone,
+  active,
+  onClick,
+}: {
+  label: string;
+  count: number;
+  icon: Icon;
+  tone: string;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return <button type="button" className={`work-queue-summary-card ${active ? "active" : ""}`} onClick={onClick} aria-pressed={active}><span className={`work-queue-summary-icon ${tone}`}><IconComponent size={18} /></span><span><small>{label}</small><strong>{count}</strong></span><ChevronRight size={15} /></button>;
+}
+
+function WorkQueueTableHeader({ completed = false }: { completed?: boolean }) {
+  return <div className="work-queue-table-header" role="row"><span role="columnheader">Task</span><span role="columnheader">Related to</span><span role="columnheader">Type</span><span role="columnheader">Status</span><span role="columnheader">{completed ? "Completed" : "Due date"}</span><span role="columnheader">Actions</span></div>;
+}
+
+function WorkQueueRow({
+  item,
+  selected,
+  onSelect,
+}: {
+  item: WorkQueueItem;
+  selected: boolean;
+  onSelect: () => void;
+}) {
+  const completed = Boolean(item.completed);
+  const deletion = Boolean(item.deletionRequest);
+  const dueState = taskDueState(item.task);
+  const actionLabel = completed ? "View" : deletion ? "Review" : item.task.id.startsWith("workflow:") && item.lead ? nextStepForLead(item.lead, Boolean(item.lead.downPaymentSubmittedForFinance)).label : "Open";
+  return <div className={`work-queue-row ${selected ? "selected" : ""}`} role="row" tabIndex={0} aria-selected={selected} aria-label={`${item.task.title}, ${workQueueTypeLabel(item)}, ${workQueueStatus(item)}`} onClick={onSelect} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onSelect(); } }}>
+    <div className="work-queue-task-cell" role="cell"><strong>{item.task.title}</strong><small>{workQueueDescription(item)}</small></div>
+    <div className="work-queue-related-cell" role="cell">{item.lead ? <><strong>{item.lead.fullName}</strong><small>{pipelineStageLabel(item.lead.state)}</small></> : item.deletionRequest ? <><strong>{item.deletionRequest.leadName}</strong><small>Deletion request</small></> : <span className="muted">Franchise opportunity</span>}</div>
+    <span role="cell" className={`work-queue-badge type-${workQueueType(item)}`}>{workQueueTypeLabel(item)}</span>
+    <span role="cell" className={`work-queue-badge status-${workQueueStatus(item).toLowerCase().replace(/[^a-z]+/g, "-")}`}><i />{workQueueStatus(item)}</span>
+    <span role="cell" className={`work-queue-due ${dueState === "overdue" ? "is-overdue" : ""}`}><CalendarDays size={14} />{completed ? formatDateTime(item.completed?.completedAt ?? item.task.createdAt) : workQueueDueLabel(item)}</span>
+    <button type="button" className="button button-secondary work-queue-row-action" onClick={(event) => { event.stopPropagation(); onSelect(); }}>{actionLabel} <ChevronRight size={14} /></button>
+  </div>;
+}
+
+function WorkQueueDrawer({
+  item,
+  user,
+  closeRef,
+  onClose,
+  onComplete,
+  onDeletionAction,
+}: {
+  item: WorkQueueItem;
+  user: NonNullable<typeof session.user>;
+  closeRef: RefObject<HTMLButtonElement | null>;
+  onClose: () => void;
+  onComplete: (task: Task) => Promise<void>;
+  onDeletionAction: (mode: "approve" | "reject") => void;
+}) {
+  const deletion = Boolean(item.deletionRequest);
+  const workflowAction = item.task.id.startsWith("workflow:") || deletion;
+  const canManage = hasRole(user.role, marketingWriteRoles);
+  const canReviewDeletion = hasRole(user.role, ["GeneralManager"]) && deletion;
+  const fullDetailsPath = item.lead
+    ? `/leads/${item.lead.id}?tab=${encodeURIComponent(taskWorkflowTab(item.task, item.lead))}`
+    : item.deletionRequest
+      ? `/leads/${item.deletionRequest.leadId}`
+      : undefined;
+  return <div className="work-queue-drawer-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><aside className="work-queue-drawer" role="dialog" aria-modal="true" aria-labelledby="work-queue-drawer-title"><div className="work-queue-drawer-header"><div><h2 id="work-queue-drawer-title">{deletion ? "Review lead deletion" : item.task.title}</h2><span className={`work-queue-badge status-${workQueueStatus(item).toLowerCase().replace(/[^a-z]+/g, "-")}`}><i />{workQueueStatus(item)}</span></div><button ref={closeRef} type="button" className="icon-button" onClick={onClose} aria-label="Close task details"><X size={18} /></button></div><p className="work-queue-drawer-description">{workQueueDescription(item)}</p><dl className="work-queue-drawer-details"><div><dt>Related record</dt><dd>{item.lead?.fullName ?? item.deletionRequest?.leadName ?? "Franchise opportunity"}</dd></div><div><dt>Type</dt><dd>{workQueueTypeLabel(item)}</dd></div>{item.deletionRequest && <><div><dt>Requestor</dt><dd>{item.deletionRequest.requestedByName ?? "Sales Agent"}</dd></div><div><dt>Reason</dt><dd>{item.deletionRequest.reason}</dd></div><div><dt>Current step</dt><dd>Pending GM review</dd></div></>}{!item.deletionRequest && <div><dt>Due date</dt><dd>{workQueueDueLabel(item)}</dd></div>}<div><dt>Assigned to</dt><dd>{workflowAction ? "Your role" : item.task.assignedTo === user.id ? "You" : item.task.assignedTo}</dd></div><div><dt>{item.completed ? "Completed" : "Created"}</dt><dd>{formatDateTime(item.completed?.completedAt ?? item.task.createdAt)}</dd></div></dl><details className="work-queue-drawer-additional"><summary>Additional details</summary><p>{item.lead?.notes || item.lead?.questionsConcerns || workQueueDescription(item)}</p></details><div className="work-queue-drawer-footer">{canReviewDeletion ? <><button type="button" className="button button-danger" onClick={() => onDeletionAction("reject")}>Reject</button><button type="button" className="button button-primary" onClick={() => onDeletionAction("approve")}>Approve deletion</button></> : !item.completed && canManage && !workflowAction ? <button type="button" className="button button-primary" onClick={() => void onComplete(item.task)}>Mark complete</button> : null}{fullDetailsPath && <NavLink className="button button-secondary work-queue-full-details" to={fullDetailsPath} onClick={onClose}>{workflowAction && !deletion ? "Continue in workflow" : "Open full details"}<ChevronRight size={15} /></NavLink>}</div></aside></div>;
+}
+
+function WorkQueueEmpty({ filtered, onClear, completed = false }: { filtered: boolean; onClear: () => void; completed?: boolean }) {
+  return <div className="work-queue-empty"><ListChecks size={24} /><strong>{completed ? "No completed work yet" : filtered ? "No tasks match your filters" : "You're all caught up"}</strong><span>{completed ? "Tasks and workflow actions you finish will appear here." : filtered ? "Adjust or clear the filters to see other tasks." : "There are no open tasks requiring your attention."}</span>{filtered && <button type="button" className="text-link" onClick={onClear}>Clear filters</button>}</div>;
+}
+
+function WorkQueueSkeleton() {
+  return <div className="work-queue-skeleton" aria-label="Loading tasks">{Array.from({ length: 5 }, (_, index) => <div key={index} className="work-queue-skeleton-row"><span /><span /><span /><span /></div>)}</div>;
+}
+
+function workQueueItemId(item: WorkQueueItem) {
+  return item.completed ? `completed:${item.completed.kind}:${item.completed.id}` : item.task.id;
+}
+function workQueueType(item: WorkQueueItem) {
+  if (item.deletionRequest) return "approval";
+  const title = item.task.title.toLowerCase();
+  if (title.includes("payment") || title.includes("finance")) return "finance";
+  if (title.includes("contract") || title.includes("signature")) return "contract";
+  if (title.includes("inquiry") || title.includes("information")) return "inquiry";
+  if (item.task.id.startsWith("workflow:")) return "workflow";
+  return "task";
+}
+function workQueueTypeLabel(item: WorkQueueItem) {
+  const labels: Record<string, string> = { approval: "Approval", finance: "Finance", contract: "Contract", inquiry: "Inquiry", workflow: "Workflow", task: "Task" };
+  return labels[workQueueType(item)] ?? "Task";
+}
+function workQueueStatus(item: WorkQueueItem) {
+  if (item.completed) return "Completed";
+  if (item.deletionRequest) return "Pending GM review";
+  if (taskDueState(item.task) === "overdue") return "Overdue";
+  if (item.task.id.startsWith("workflow:")) return "Needs action";
+  return "Open";
+}
+function workQueueDescription(item: WorkQueueItem) {
+  if (item.completed) return item.completed.detail;
+  if (item.deletionRequest) return `Deletion request awaiting approval. Reason: ${item.deletionRequest.reason}`;
+  return taskReason(item.task, item.lead);
+}
+function workQueueDueLabel(item: WorkQueueItem) {
+  if (item.deletionRequest) return "No due date";
+  return taskDueLabel(item.task);
+}
+function workQueueSearchText(item: WorkQueueItem) {
+  return [item.task.title, workQueueDescription(item), item.lead?.fullName, item.lead?.email, item.lead?.notes, item.deletionRequest?.leadName, item.deletionRequest?.leadEmail, item.deletionRequest?.requestedByName, item.deletionRequest?.reason].filter(Boolean).join(" ");
+}
+function sortWorkQueueItems(a: WorkQueueItem, b: WorkQueueItem, sortBy: string) {
+  if (sortBy === "recent" || sortBy === "oldest") {
+    const result = Date.parse(a.completed?.completedAt ?? a.task.createdAt) - Date.parse(b.completed?.completedAt ?? b.task.createdAt);
+    return sortBy === "recent" ? -result : result;
+  }
+  const dueA = a.task.dueAt ? Date.parse(a.task.dueAt) : Number.MAX_SAFE_INTEGER;
+  const dueB = b.task.dueAt ? Date.parse(b.task.dueAt) : Number.MAX_SAFE_INTEGER;
+  if (sortBy === "dueAsc") return dueA - dueB;
+  if (sortBy === "dueDesc") return dueB - dueA;
+  const priority = (item: WorkQueueItem) => item.deletionRequest ? 0 : taskDueState(item.task) === "overdue" ? 1 : taskDueState(item.task) === "today" ? 2 : taskDueState(item.task) === "upcoming" ? 3 : 4;
+  return priority(a) - priority(b) || dueA - dueB;
 }
 
 function TasksContent({
@@ -7514,19 +9042,24 @@ function TasksContent({
   const [createOpen, setCreateOpen] = useState(false);
   const [view, setView] = useState<"todo" | "completed">("todo");
   const [notice, setNotice] = useState<Notice | null>(null);
+  const [deletionRequests, setDeletionRequests] = useState<LeadDeletionRequest[]>([]);
   const canManageTasks = hasRole(user.role, marketingWriteRoles);
   const load = async () => {
     try {
-      const [nextTasks, nextCompletedWork, nextLeads] = await Promise.all([
+      const [nextTasks, nextCompletedWork, nextLeads, nextDeletionRequests] = await Promise.all([
         api.tasks.list(),
         api.tasks.completed(1),
         api.leads.list("?limit=100&sort=updatedAt"),
+        hasRole(user.role, ["GeneralManager"])
+          ? api.leads.deletionRequests().catch(() => [] as LeadDeletionRequest[])
+          : Promise.resolve([] as LeadDeletionRequest[]),
       ]);
       setTasks(nextTasks);
       setCompletedWork(nextCompletedWork.items);
       setCompletedPage(nextCompletedWork.page);
       setCompletedTotal(nextCompletedWork.total);
       setLeads(nextLeads.items);
+      setDeletionRequests(nextDeletionRequests);
     } catch (e) {
       setNotice({
         message: errorMessage(e, "Unable to load tasks."),
@@ -7597,17 +9130,30 @@ function TasksContent({
       createdAt: lead.updatedAt,
       dueAt: workflowDueAt.toISOString(),
     }));
-  const openTasks = [...persistedOpenTasks, ...workflowTasks];
-  const overdueTasks = openTasks.filter(
+  const deletionRequestByTaskId = new Map(
+    deletionRequests.map((request) => [`deletion:${request.id}`, request]),
+  );
+  const deletionTasks: Task[] = deletionRequests.map((request) => ({
+    id: `deletion:${request.id}`,
+    leadId: request.leadId,
+    assignedTo: user.id,
+    title: "Review lead deletion",
+    status: "Open",
+    createdAt: request.requestedAt,
+    dueAt: null,
+  }));
+  const openTasks = [...persistedOpenTasks, ...workflowTasks, ...deletionTasks];
+  const scheduledWorkTasks = [...persistedOpenTasks, ...workflowTasks];
+  const overdueTasks = scheduledWorkTasks.filter(
     (task) => taskDueState(task) === "overdue",
   );
-  const dueTodayTasks = openTasks.filter(
+  const dueTodayTasks = scheduledWorkTasks.filter(
     (task) => taskDueState(task) === "today",
   );
-  const upcomingTasks = openTasks.filter(
+  const upcomingTasks = scheduledWorkTasks.filter(
     (task) => taskDueState(task) === "upcoming",
   );
-  const unscheduledTasks = openTasks.filter(
+  const unscheduledTasks = scheduledWorkTasks.filter(
     (task) => taskDueState(task) === "unscheduled",
   );
   const ordered = (items: Task[]) =>
@@ -7713,6 +9259,18 @@ function TasksContent({
         </section>
       ) : (
         <div className="task-queue-groups">
+          {deletionTasks.length > 0 && (
+            <TaskQueueGroup
+              title="Needs review"
+              hint="Deletion requests awaiting your approval."
+              tasks={deletionTasks}
+              leadById={leadById}
+              deletionRequestByTaskId={deletionRequestByTaskId}
+              canManage={canManageTasks}
+              currentUserId={user.id}
+              onComplete={complete}
+            />
+          )}
           {overdueTasks.length > 0 && (
             <TaskQueueGroup
               title="Overdue"
@@ -7778,6 +9336,7 @@ function TaskQueueGroup({
   hint,
   tasks,
   leadById,
+  deletionRequestByTaskId,
   canManage,
   currentUserId,
   onComplete,
@@ -7787,6 +9346,7 @@ function TaskQueueGroup({
   hint: string;
   tasks: Task[];
   leadById: Map<string, Lead>;
+  deletionRequestByTaskId?: Map<string, LeadDeletionRequest>;
   canManage: boolean;
   currentUserId: string;
   onComplete: (task: Task) => void;
@@ -7803,6 +9363,7 @@ function TaskQueueGroup({
               key={task.id}
               task={task}
               lead={leadById.get(task.leadId)}
+              deletionRequest={deletionRequestByTaskId?.get(task.id)}
               canManage={canManage}
               currentUserId={currentUserId}
               onComplete={onComplete}
@@ -7819,6 +9380,7 @@ function TaskQueueGroup({
 function TaskQueueCard({
   task,
   lead,
+  deletionRequest,
   canManage,
   currentUserId,
   onComplete,
@@ -7826,16 +9388,20 @@ function TaskQueueCard({
 }: {
   task: Task;
   lead?: Lead;
+  deletionRequest?: LeadDeletionRequest;
   canManage: boolean;
   currentUserId: string;
   onComplete: (task: Task) => void;
   completed?: boolean;
 }) {
   const tab = taskWorkflowTab(task, lead);
-  const workflowAction = task.id.startsWith("workflow:");
+  const workflowAction = task.id.startsWith("workflow:") || task.id.startsWith("deletion:");
+  const deletionApproval = task.id.startsWith("deletion:");
   const dueState = taskDueState(task);
   const workflow = lead ? nextStepForLead(lead) : null;
-  const reason = taskReason(task, lead);
+  const reason = deletionApproval && deletionRequest
+    ? `Requested by ${deletionRequest.requestedByName ?? "Sales Agent"}. Reason: ${deletionRequest.reason}`
+    : taskReason(task, lead);
   return (
     <article
       className={`task-queue-card ${completed ? "completed" : ""} ${dueState}`}
@@ -7861,6 +9427,10 @@ function TaskQueueCard({
           <NavLink to={`/leads/${lead.id}`} className="task-queue-lead">
             {lead.fullName} · {pipelineStageLabel(lead.state)}
           </NavLink>
+        ) : deletionRequest ? (
+          <NavLink to={`/leads/${deletionRequest.leadId}`} className="task-queue-lead">
+            {deletionRequest.leadName} · Deletion approval
+          </NavLink>
         ) : (
           <span className="task-queue-lead">Franchise opportunity</span>
         )}
@@ -7881,12 +9451,12 @@ function TaskQueueCard({
           </span>
         </div>
       </div>
-      {!completed && lead && (
+      {!completed && (lead || deletionRequest) && (
         <NavLink
-          to={`/leads/${lead.id}?tab=${encodeURIComponent(tab)}`}
+          to={`/leads/${lead?.id ?? deletionRequest?.leadId}?tab=${encodeURIComponent(tab)}`}
           className="button button-secondary task-queue-action"
         >
-          {workflow?.label ?? "Open workflow"} <ChevronRight size={15} />
+          {deletionApproval ? "Review deletion" : workflow?.label ?? "Open workflow"} <ChevronRight size={15} />
         </NavLink>
       )}
     </article>
@@ -7948,6 +9518,7 @@ function taskDueState(
 }
 function taskDueLabel(task: Task) {
   if (task.id.startsWith("workflow:")) return "Current workflow action";
+  if (task.id.startsWith("deletion:")) return "Pending GM review";
   if (!task.dueAt) return "No due date";
   const state = taskDueState(task);
   const date = new Intl.DateTimeFormat("en-PH", {
@@ -8181,9 +9752,9 @@ function FinanceWorkbench() {
         </div>
         <div className="finance-toolbar">
           <label className="finance-search"><Search size={16} /><input value={search} onChange={(event) => changeFilter(setSearch, event.target.value)} placeholder="Search lead or invoice…" /></label>
-          <label><span>Status</span><select value={view === "action" ? "awaiting" : status} disabled={view === "action"} onChange={(event) => changeFilter(setStatus, event.target.value)}><option value="all">All statuses</option><option value="awaiting">Awaiting review</option><option value="confirmed">Confirmed</option><option value="returned">Returned</option><option value="cancelled">Cancelled</option></select></label>
-          <label><span>Date</span><select value={dateRange} onChange={(event) => changeFilter(setDateRange, event.target.value)}><option value="all">All dates</option><option value="today">Today</option><option value="7">Last 7 days</option><option value="30">Last 30 days</option><option value="90">Last 90 days</option></select></label>
-          <label><span>Owner</span><select value={ownerId} onChange={(event) => changeFilter(setOwnerId, event.target.value)}><option value="">All owners</option>{owners.map((owner) => <option key={owner.id} value={owner.id}>{owner.displayName}</option>)}</select></label>
+          <label><span>Status</span><BrandedSelect value={view === "action" ? "awaiting" : status} disabled={view === "action"} onChange={(value) => changeFilter(setStatus, value)} ariaLabel="Payment status" options={[{ value: "all", label: "All statuses" }, { value: "awaiting", label: "Awaiting review" }, { value: "confirmed", label: "Confirmed" }, { value: "returned", label: "Returned" }, { value: "cancelled", label: "Cancelled" }]} /></label>
+          <label><span>Date</span><BrandedSelect value={dateRange} onChange={(value) => changeFilter(setDateRange, value)} ariaLabel="Payment date" options={[{ value: "all", label: "All dates" }, { value: "today", label: "Today" }, { value: "7", label: "Last 7 days" }, { value: "30", label: "Last 30 days" }, { value: "90", label: "Last 90 days" }]} /></label>
+          <label><span>Owner</span><BrandedSelect value={ownerId} onChange={(value) => changeFilter(setOwnerId, value)} ariaLabel="Payment owner" options={[{ value: "", label: "All owners" }, ...owners.map((owner) => ({ value: owner.id, label: owner.displayName }))]} /></label>
         </div>
         {error && <div className="form-error">{error}</div>}
         {loading ? <Loading /> : items.length ? <><div className="finance-table-wrap"><div className="finance-table finance-table-heading"><span>Lead / franchise</span><span>Invoice</span><span>Amount</span><span>Submitted</span><span>Age</span><span>Status</span><span /></div>{items.map((item) => <FinancePaymentRow key={item.paymentId} item={item} onOpen={() => setSelectedPaymentId(item.paymentId)} />)}</div><FinancePagination page={page} totalPages={totalPages} total={result?.total ?? 0} onChange={setPage} /></> : <div className="finance-empty"><CheckCircle2 size={22} /><strong>{view === "action" ? "No down payments awaiting review" : "No down-payment history matches"}</strong><span>{view === "action" ? "New submitted down-payment packages will appear here. Balance payments are available in Payments & balances." : "Try a different search, status, owner, or date filter."}</span></div>}
@@ -8222,7 +9793,7 @@ function PaymentsManagement() {
   return <Page title="Payments & balances" subtitle="Track the down payment, record balance payments, and keep the remaining amount visible at every step.">
     {notice && <NoticeBar notice={notice} onClose={() => setNotice(null)} />}
     <div className="finance-metrics"><FinanceMetric label="Total collected" value={formatMoney(result?.totalCollected ?? 0)} hint="Confirmed down payment and balance" tone="green" icon={CheckCircle2} /><FinanceMetric label="Outstanding balance" value={formatMoney(result?.totalOutstanding ?? 0)} hint="Across payment accounts" tone="amber" icon={WalletCards} /><FinanceMetric label="Pending verification" value={String(result?.pendingVerificationCount ?? 0)} hint="Balance payments awaiting Finance" tone="orange" icon={Clock3} /><FinanceMetric label="Paid in full" value={String(result?.paidInFullCount ?? 0)} hint="Ready for the next workflow step" tone="slate" icon={ShieldCheck} /></div>
-    <section className="panel finance-workbench-panel"><div className="finance-workbench-header"><div><h2>Franchisee payment accounts</h2><p>Open an account to see the ledger, upload payment proof, or view the acknowledgement receipt.</p></div></div><div className="finance-toolbar"><label className="finance-search"><Search size={16} /><input value={search} onChange={(event) => changeFilter(setSearch, event.target.value)} placeholder="Search franchisee, email, or contact…" /></label><label><span>Payment status</span><select value={status} onChange={(event) => changeFilter(setStatus, event.target.value)}><option value="all">All accounts</option><option value="AwaitingDownPayment">Awaiting down payment</option><option value="DownPaymentOnly">Down payment only</option><option value="BalancePending">Balance pending verification</option><option value="PartiallyPaid">Partially paid</option><option value="PaidInFull">Paid in full</option></select></label></div>{error && <div className="form-error">{error}</div>}{loading ? <Loading /> : result?.items.length ? <><div className="finance-table-wrap"><div className="finance-table finance-table-heading"><span>Franchisee</span><span>Total fee</span><span>Down payment</span><span>Balance paid</span><span>Remaining</span><span>Status</span><span /></div>{result.items.map((item) => <PaymentManagementRow key={item.leadId} item={item} onOpen={() => setSelectedLeadId(item.leadId)} />)}</div><FinancePagination page={page} totalPages={totalPages} total={result.total} onChange={setPage} /></> : <div className="finance-empty"><WalletCards size={22} /><strong>No payment accounts match</strong><span>Payment accounts appear after a down-payment invoice has been configured.</span></div>}</section>
+    <section className="panel finance-workbench-panel"><div className="finance-workbench-header"><div><h2>Franchisee payment accounts</h2><p>Open an account to see the ledger, upload payment proof, or view the acknowledgement receipt.</p></div></div><div className="finance-toolbar"><label className="finance-search"><Search size={16} /><input value={search} onChange={(event) => changeFilter(setSearch, event.target.value)} placeholder="Search franchisee, email, or contact…" /></label><label><span>Payment status</span><BrandedSelect value={status} onChange={(value) => changeFilter(setStatus, value)} ariaLabel="Payment status" options={[{ value: "all", label: "All accounts" }, { value: "AwaitingDownPayment", label: "Awaiting down payment" }, { value: "DownPaymentOnly", label: "Down payment only" }, { value: "BalancePending", label: "Balance pending verification" }, { value: "PartiallyPaid", label: "Partially paid" }, { value: "PaidInFull", label: "Paid in full" }]} /></label></div>{error && <div className="form-error">{error}</div>}{loading ? <Loading /> : result?.items.length ? <><div className="finance-table-wrap"><div className="finance-table finance-table-heading"><span>Franchisee</span><span>Total fee</span><span>Down payment</span><span>Balance paid</span><span>Remaining</span><span>Status</span><span /></div>{result.items.map((item) => <PaymentManagementRow key={item.leadId} item={item} onOpen={() => setSelectedLeadId(item.leadId)} />)}</div><FinancePagination page={page} totalPages={totalPages} total={result.total} onChange={setPage} /></> : <div className="finance-empty"><WalletCards size={22} /><strong>No payment accounts match</strong><span>Payment accounts appear after a down-payment invoice has been configured.</span></div>}</section>
     {selectedLeadId && <PaymentAccountDrawer leadId={selectedLeadId} onClose={() => setSelectedLeadId(null)} onAccountUpdated={() => { setRefreshTick((value) => value + 1); setNotice({ message: "Payment account updated.", tone: "success" }); }} />}
   </Page>;
 }
@@ -8421,7 +9992,7 @@ function PaymentAccountDrawer({ leadId, onClose, onAccountUpdated }: { leadId: s
       setBusy(false);
     }
   };
-  return <div className="finance-drawer-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><aside className="finance-drawer" role="dialog" aria-modal="true" aria-labelledby="payment-account-title"><div className="finance-drawer-header"><div><span className="eyebrow">PAYMENT ACCOUNT</span><h2 id="payment-account-title">{loading ? "Loading account…" : account?.leadName ?? "Payment details"}</h2>{account && <p>{account.address || "Address not provided"} · {account.productLine ?? "Franchise package"}</p>}</div><button className="icon-button" onClick={onClose} aria-label="Close payment account"><X size={18} /></button></div>{error && <div className="form-error">{error}</div>}{loading ? <Loading /> : account ? <><div className="payment-account-summary"><Info label="Total fee" value={formatMoney(account.totalAmount, account.currency)} /><Info label="Confirmed collected" value={formatMoney((account.downPaymentStatus === "Confirmed" ? account.downPaymentAmount : 0) + account.confirmedBalance, account.currency)} /><Info label="Remaining" value={formatMoney(account.remainingBalance, account.currency)} /><Info label="Pending review" value={formatMoney(account.pendingBalance, account.currency)} /></div><div className="finance-drawer-section"><div className="section-heading-inline"><div><h3>Down payment</h3><p>{statusLabel(account.downPaymentStatus)}</p></div>{account.downPaymentStatus === "Confirmed" && <button className="button button-secondary" onClick={receipt}><FileText size={15} /> View AR</button>}</div><small className="muted">{account.acknowledgementReceiptNumber ? `Acknowledgement receipt ${account.acknowledgementReceiptNumber}` : account.downPaymentStatus === "Confirmed" ? "Acknowledgement receipt will be prepared when opened." : "Available after Finance confirms the down payment."}</small></div><div className="finance-drawer-section"><h3>Balance payment ledger</h3>{account.balancePayments.length ? <div className="payment-ledger">{account.balancePayments.map((payment) => <div className="payment-ledger-row" key={payment.id}><div><strong>{formatMoney(payment.amount, payment.currency)}</strong><span>{payment.paymentMethod} · {payment.referenceNumber}</span><small>{formatDateTime(payment.paidAt)} · {statusLabel(payment.status)}</small>{payment.acknowledgementReceiptNumber && <small className="payment-receipt-number">Receipt {payment.acknowledgementReceiptNumber}</small>}{payment.returnReason && <small className="form-error-inline">{payment.returnReason}</small>}</div><div>{payment.status === "Submitted" && canConfirm ? <div className="payment-ledger-actions"><button className="button button-primary" disabled={busy || !payment.hasEvidence} onClick={() => confirm(payment)}>{payment.hasEvidence ? "Confirm" : "Proof required"}</button><button className="text-link" disabled={busy} onClick={() => openReturnDialog(payment)}>Return</button></div> : payment.status === "Confirmed" ? <div className="payment-ledger-actions"><span className={`finance-status ${payment.status.toLowerCase()}`}>{statusLabel(payment.status)}</span><button className="button button-secondary" disabled={busy} onClick={() => balanceReceipt(payment)}><FileText size={13} /> View receipt</button></div> : <span className={`finance-status ${payment.status.toLowerCase()}`}>{statusLabel(payment.status)}</span>}</div></div>)}</div> : <p className="muted">No balance payments recorded yet.</p>}</div>{canRecord && account.downPaymentStatus === "Confirmed" && account.remainingBalance > 0 && availableBalance <= 0 && <div className="finance-drawer-section"><h3>Balance payment on hold</h3><p className="muted">A balance payment is awaiting Finance verification. Record another payment after it is confirmed or returned.</p></div>}{canRecord && account.downPaymentStatus === "Confirmed" && availableBalance > 0 && <div className="finance-drawer-section"><h3>Record a balance payment</h3><p className="muted">This records an offline or manually verified payment. Finance confirms it after the proof is uploaded.</p><form className="stack-form" onSubmit={record}><label><span>Amount <span className="required-mark">*</span></span><input type="number" min="0.01" step="0.01" value={amount} onChange={(event) => changeAmount(event.target.value)} max={availableBalance} placeholder={availableBalance.toFixed(2)} aria-required="true" /></label><label><span>Payment date and time <span className="required-mark">*</span></span><BrandedDateTimePicker value={paidAt} onChange={setPaidAt} selectedLabel="Payment date" emptyLabel="Required · choose a date and time" required /></label><label><span>Payment method <span className="required-mark">*</span></span><select value={method} onChange={(event) => setMethod(event.target.value)}><option>Bank transfer</option><option>Cash</option><option>Cheque</option><option>Online transfer</option><option>Other</option></select></label><label><span>Reference number <span className="required-mark">*</span></span><input value={reference} onChange={(event) => setReference(event.target.value)} maxLength={120} aria-required="true" placeholder="Bank or receipt reference" /></label><div className="payment-proof-field"><span>Payment proof <span className="required-mark">*</span></span><DocumentDropzone file={proofFile} onChange={(file) => setProofFile(file ?? null)} /><small className="muted">Required — attach the receipt or bank confirmation before recording this payment.</small></div><label>Notes (optional)<textarea value={notes} onChange={(event) => setNotes(event.target.value)} maxLength={2000} placeholder="Add context Finance should see." /></label><button className="button button-primary button-wide" disabled={busy}>{busy ? "Saving…" : "Record balance payment"}</button></form></div>}{account.balancePayments.filter((payment) => payment.status === "Submitted").map((payment) => <div className="finance-drawer-section" key={`proof-${payment.id}`}><h3>Proof for {formatMoney(payment.amount, payment.currency)}</h3><DocumentsPanel lead={{ id: account.leadId }} fixedDocumentType="BALANCE_PAYMENT_RECEIPT" relatedPaymentId={payment.id} onNotice={({ message }) => setError(message)} onDocumentsChanged={load} uploadedOnly documentCard /></div>)}</> : null}{returningPayment && <Modal title="Return balance payment" subtitle="Send this payment back for correction with a clear reason for the submitter." onClose={() => { if (!busy) setReturningPayment(null); }}><form className="stack-form" onSubmit={(event) => { event.preventDefault(); const reason = returnReason.trim(); if (reason.length < 2) { setReturnError("Enter at least 2 characters explaining the correction needed."); return; } void returnPayment(returningPayment, reason); }}><p className="muted">Payment {returningPayment.referenceNumber} · {formatMoney(returningPayment.amount, returningPayment.currency)}</p><label><span>Reason for return <span className="required-mark">*</span></span><textarea autoFocus maxLength={2000} value={returnReason} onChange={(event) => { setReturnReason(event.target.value); setReturnError(""); }} placeholder="Explain what needs to be corrected before Finance can confirm this payment." /></label>{returnError && <div className="form-error">{returnError}</div>}<div className="form-actions"><button type="button" className="button button-secondary" onClick={() => setReturningPayment(null)} disabled={busy}>Cancel</button><button className="button button-primary" disabled={busy}>{busy ? "Returning…" : "Return payment"}</button></div></form></Modal>}</aside></div>;
+  return <div className="finance-drawer-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><aside className="finance-drawer" role="dialog" aria-modal="true" aria-labelledby="payment-account-title"><div className="finance-drawer-header"><div><span className="eyebrow">PAYMENT ACCOUNT</span><h2 id="payment-account-title">{loading ? "Loading account…" : account?.leadName ?? "Payment details"}</h2>{account && <p>{account.address || "Address not provided"} · {account.productLine ?? "Franchise package"}</p>}</div><button className="icon-button" onClick={onClose} aria-label="Close payment account"><X size={18} /></button></div>{error && <div className="form-error">{error}</div>}{loading ? <Loading /> : account ? <><div className="payment-account-summary"><Info label="Total fee" value={formatMoney(account.totalAmount, account.currency)} /><Info label="Confirmed collected" value={formatMoney((account.downPaymentStatus === "Confirmed" ? account.downPaymentAmount : 0) + account.confirmedBalance, account.currency)} /><Info label="Remaining" value={formatMoney(account.remainingBalance, account.currency)} /><Info label="Pending review" value={formatMoney(account.pendingBalance, account.currency)} /></div><div className="finance-drawer-section"><div className="section-heading-inline"><div><h3>Down payment</h3><p>{statusLabel(account.downPaymentStatus)}</p></div>{account.downPaymentStatus === "Confirmed" && <button className="button button-secondary" onClick={receipt}><FileText size={15} /> View AR</button>}</div><small className="muted">{account.acknowledgementReceiptNumber ? `Acknowledgement receipt ${account.acknowledgementReceiptNumber}` : account.downPaymentStatus === "Confirmed" ? "Acknowledgement receipt will be prepared when opened." : "Available after Finance confirms the down payment."}</small></div><div className="finance-drawer-section"><h3>Balance payment ledger</h3>{account.balancePayments.length ? <div className="payment-ledger">{account.balancePayments.map((payment) => <div className="payment-ledger-row" key={payment.id}><div><strong>{formatMoney(payment.amount, payment.currency)}</strong><span>{payment.paymentMethod} · {payment.referenceNumber}</span><small>{formatDateTime(payment.paidAt)} · {statusLabel(payment.status)}</small>{payment.acknowledgementReceiptNumber && <small className="payment-receipt-number">Receipt {payment.acknowledgementReceiptNumber}</small>}{payment.returnReason && <small className="form-error-inline">{payment.returnReason}</small>}</div><div>{payment.status === "Submitted" && canConfirm ? <div className="payment-ledger-actions"><button className="button button-primary" disabled={busy || !payment.hasEvidence} onClick={() => confirm(payment)}>{payment.hasEvidence ? "Confirm" : "Proof required"}</button><button className="text-link" disabled={busy} onClick={() => openReturnDialog(payment)}>Return</button></div> : payment.status === "Confirmed" ? <div className="payment-ledger-actions"><span className={`finance-status ${payment.status.toLowerCase()}`}>{statusLabel(payment.status)}</span><button className="button button-secondary" disabled={busy} onClick={() => balanceReceipt(payment)}><FileText size={13} /> View receipt</button></div> : <span className={`finance-status ${payment.status.toLowerCase()}`}>{statusLabel(payment.status)}</span>}</div></div>)}</div> : <p className="muted">No balance payments recorded yet.</p>}</div>{canRecord && account.downPaymentStatus === "Confirmed" && account.remainingBalance > 0 && availableBalance <= 0 && <div className="finance-drawer-section"><h3>Balance payment on hold</h3><p className="muted">A balance payment is awaiting Finance verification. Record another payment after it is confirmed or returned.</p></div>}{canRecord && account.downPaymentStatus === "Confirmed" && availableBalance > 0 && <div className="finance-drawer-section"><h3>Record a balance payment</h3><p className="muted">This records an offline or manually verified payment. Finance confirms it after the proof is uploaded.</p><form className="stack-form" onSubmit={record}><label><span>Amount <span className="required-mark">*</span></span><input type="number" min="0.01" step="0.01" value={amount} onChange={(event) => changeAmount(event.target.value)} max={availableBalance} placeholder={availableBalance.toFixed(2)} aria-required="true" /></label><label><span>Payment date and time <span className="required-mark">*</span></span><BrandedDateTimePicker value={paidAt} onChange={setPaidAt} selectedLabel="Payment date" emptyLabel="Required · choose a date and time" required /></label><label><span>Payment method <span className="required-mark">*</span></span><BrandedSelect value={method} onChange={setMethod} required ariaLabel="Payment method" options={[{ value: "Bank transfer", label: "Bank transfer" }, { value: "Cash", label: "Cash" }, { value: "Cheque", label: "Cheque" }, { value: "Online transfer", label: "Online transfer" }, { value: "Other", label: "Other" }]} /></label><label><span>Reference number <span className="required-mark">*</span></span><input value={reference} onChange={(event) => setReference(event.target.value)} maxLength={120} aria-required="true" placeholder="Bank or receipt reference" /></label><div className="payment-proof-field"><span>Payment proof <span className="required-mark">*</span></span><DocumentDropzone file={proofFile} onChange={(file) => setProofFile(file ?? null)} /><small className="muted">Required — attach the receipt or bank confirmation before recording this payment.</small></div><label>Notes (optional)<textarea value={notes} onChange={(event) => setNotes(event.target.value)} maxLength={2000} placeholder="Add context Finance should see." /></label><button className="button button-primary button-wide" disabled={busy}>{busy ? "Saving…" : "Record balance payment"}</button></form></div>}{account.balancePayments.filter((payment) => payment.status === "Submitted").map((payment) => <div className="finance-drawer-section" key={`proof-${payment.id}`}><h3>Proof for {formatMoney(payment.amount, payment.currency)}</h3><DocumentsPanel lead={{ id: account.leadId }} fixedDocumentType="BALANCE_PAYMENT_RECEIPT" relatedPaymentId={payment.id} onNotice={({ message }) => setError(message)} onDocumentsChanged={load} uploadedOnly documentCard /></div>)}</> : null}{returningPayment && <Modal title="Return balance payment" subtitle="Send this payment back for correction with a clear reason for the submitter." onClose={() => { if (!busy) setReturningPayment(null); }}><form className="stack-form" onSubmit={(event) => { event.preventDefault(); const reason = returnReason.trim(); if (reason.length < 2) { setReturnError("Enter at least 2 characters explaining the correction needed."); return; } void returnPayment(returningPayment, reason); }}><p className="muted">Payment {returningPayment.referenceNumber} · {formatMoney(returningPayment.amount, returningPayment.currency)}</p><label><span>Reason for return <span className="required-mark">*</span></span><textarea autoFocus maxLength={2000} value={returnReason} onChange={(event) => { setReturnReason(event.target.value); setReturnError(""); }} placeholder="Explain what needs to be corrected before Finance can confirm this payment." /></label>{returnError && <div className="form-error">{returnError}</div>}<div className="form-actions"><button type="button" className="button button-secondary" onClick={() => setReturningPayment(null)} disabled={busy}>Cancel</button><button className="button button-primary" disabled={busy}>{busy ? "Returning…" : "Return payment"}</button></div></form></Modal>}</aside></div>;
 }
 
 function FinanceMetric({ label, value, hint, tone, icon: IconComponent }: { label: string; value: string; hint: string; tone: string; icon: Icon }) {
@@ -8443,6 +10014,7 @@ function FinancePaymentDrawer({ paymentId, onClose, onConfirmed }: { paymentId: 
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [reference, setReference] = useState("");
+  const [proofDocumentId, setProofDocumentId] = useState("");
   const [error, setError] = useState("");
   useEffect(() => {
     const escape = (event: KeyboardEvent) => event.key === "Escape" && onClose();
@@ -8452,8 +10024,15 @@ function FinancePaymentDrawer({ paymentId, onClose, onConfirmed }: { paymentId: 
   useEffect(() => {
     setError("");
     setLoading(true);
-    api.finance.payment(paymentId).then(setDetail).catch((e) => setError(errorMessage(e, "Unable to load payment details."))).finally(() => setLoading(false));
+    api.finance.payment(paymentId).then((result) => { setDetail(result); setProofDocumentId(""); }).catch((e) => setError(errorMessage(e, "Unable to load payment details."))).finally(() => setLoading(false));
   }, [paymentId]);
+  useEffect(() => {
+    if (!detail || detail.payment.status !== "Awaiting") {
+      setProofDocumentId("");
+      return;
+    }
+    if (!detail.evidenceDocuments.some((document) => document.id === proofDocumentId)) setProofDocumentId("");
+  }, [detail, proofDocumentId]);
   const refreshDetail = async () => {
     try {
       setDetail(await api.finance.payment(paymentId));
@@ -8476,9 +10055,10 @@ function FinancePaymentDrawer({ paymentId, onClose, onConfirmed }: { paymentId: 
   };
   const confirm = async () => {
     if (!detail || !reference.trim()) { setError("Enter the payment reference before confirming."); return; }
+    if (!proofDocumentId) { setError("Select the payment proof that Finance reviewed before confirming."); return; }
     setBusy(true); setError("");
     try {
-      await api.leads.confirmPayment(detail.payment.leadId, { referenceNumber: reference.trim(), amount: detail.payment.amount, currency: detail.payment.currency, paidAt: new Date().toISOString() });
+      await api.leads.confirmPayment(detail.payment.leadId, { referenceNumber: reference.trim(), amount: detail.payment.amount, currency: detail.payment.currency, paidAt: new Date().toISOString(), paymentProofDocumentId: proofDocumentId });
       onConfirmed();
     } catch (e) { setError(errorMessage(e, "Unable to confirm this payment.")); } finally { setBusy(false); }
   };
@@ -8605,8 +10185,21 @@ function FinancePaymentDrawer({ paymentId, onClose, onConfirmed }: { paymentId: 
                   Payment reference
                   <input value={reference} onChange={(event) => setReference(event.target.value)} placeholder="Bank or receipt reference" />
                 </label>
-                <button className="button button-primary button-wide" onClick={confirm} disabled={busy}>
-                  {busy ? "Confirming…" : "Confirm payment"}
+                <label>
+                  Payment proof used for this confirmation <span className="required-mark">*</span>
+                  <BrandedSelect
+                    value={proofDocumentId}
+                    onChange={setProofDocumentId}
+                    disabled={busy || !detail.evidenceDocuments.length}
+                    required
+                    invalid={!proofDocumentId}
+                    ariaLabel="Payment proof used for this confirmation"
+                    placeholder="Select the reviewed payment proof"
+                    options={detail.evidenceDocuments.map((document) => ({ value: document.id, label: `${document.fileName} · ${formatDate(document.createdAt)}` }))}
+                  />
+                </label>
+                <button className="button button-primary button-wide" onClick={confirm} disabled={busy || !detail.evidenceDocuments.length || !proofDocumentId}>
+                  {busy ? "Confirming…" : !detail.evidenceDocuments.length ? "Payment proof required" : "Confirm payment"}
                 </button>
               </div>
             )}
@@ -9119,7 +10712,7 @@ function ReportsContent() {
 }
 
 function ReportContext({ period, setPeriod, agentId, setAgentId, agents, label }: { period: "current" | "previous" | "year"; setPeriod: (value: "current" | "previous" | "year") => void; agentId: string; setAgentId: (value: string) => void; agents: { id: string; displayName: string; role: string; isActive: boolean }[]; label: string }) {
-  return <section className="report-context"><ReportPeriodPicker period={period} setPeriod={setPeriod} label={label} /><label><span>Branch</span><select disabled><option>All branches</option></select></label><label><span>Agent</span><select value={agentId} onChange={(event) => setAgentId(event.target.value)}><option value="">All agents</option>{agents.map((agent) => <option value={agent.id} key={agent.id}>{agent.displayName}</option>)}</select></label><label><span>Compare with</span><select defaultValue="previous"><option value="previous">Previous month</option></select></label></section>;
+  return <section className="report-context"><ReportPeriodPicker period={period} setPeriod={setPeriod} label={label} /><label><span>Branch</span><BrandedSelect value="all" onChange={() => undefined} disabled ariaLabel="Branch" options={[{ value: "all", label: "All branches" }]} /></label><label><span>Agent</span><BrandedSelect value={agentId} onChange={setAgentId} ariaLabel="Agent" options={[{ value: "", label: "All agents" }, ...agents.map((agent) => ({ value: agent.id, label: agent.displayName }))]} /></label><label><span>Compare with</span><BrandedSelect value="previous" onChange={() => undefined} ariaLabel="Compare with" options={[{ value: "previous", label: "Previous month" }]} /></label></section>;
 }
 
 function ReportPeriodPicker({ period, setPeriod, label }: { period: "current" | "previous" | "year"; setPeriod: (value: "current" | "previous" | "year") => void; label: string }) {
@@ -9155,26 +10748,57 @@ function parseLocalDateTime(value: string) {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
+function parseLocalDate(value: string) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const date = new Date(year, month - 1, day);
+  return date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day
+    ? date
+    : null;
+}
+
 function localDateTimeValue(date: Date) {
   const pad = (value: number) => String(value).padStart(2, "0");
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
-function localDateKey(date: Date) {
-  return `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
+function localDateValue(date: Date) {
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 }
 
-function BrandedDateTimePicker({ value, onChange, selectedLabel = "Meeting time", emptyLabel = "Optional · choose a date and time", clearLabel = "Clear date and time", required = false }: { value: string; onChange: (value: string) => void; selectedLabel?: string; emptyLabel?: string; clearLabel?: string; required?: boolean }) {
-  const selectedDate = parseLocalDateTime(value);
+function localDateKey(date: Date) {
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
+function calendarDayForMonth(year: number, month: number, day: number) {
+  return Math.min(day, new Date(year, month + 1, 0).getDate());
+}
+
+function BrandedDateTimePicker({ value, onChange, selectedLabel = "Meeting time", emptyLabel = "Optional · choose a date and time", clearLabel = "Clear date and time", required = false, dateOnly = false, maxDate, invalid = false }: { value: string; onChange: (value: string) => void; selectedLabel?: string; emptyLabel?: string; clearLabel?: string; required?: boolean; dateOnly?: boolean; maxDate?: string; invalid?: boolean }) {
+  const selectedDate = dateOnly ? parseLocalDate(value) : parseLocalDateTime(value);
+  const latestDate = maxDate ? parseLocalDate(maxDate) : null;
   const [open, setOpen] = useState(false);
   const [popoverStyle, setPopoverStyle] = useState<{ left: number; width: number; top?: number; bottom?: number } | null>(null);
   const [viewMonth, setViewMonth] = useState(() => {
     const date = selectedDate ?? new Date();
     return new Date(date.getFullYear(), date.getMonth(), 1);
   });
+  const [calendarView, setCalendarView] = useState<"days" | "months" | "years">("days");
+  const [yearPageStart, setYearPageStart] = useState(() => {
+    const date = selectedDate ?? new Date();
+    return Math.floor(date.getFullYear() / 12) * 12;
+  });
   const pickerRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    if (selectedDate) setViewMonth(new Date(selectedDate.getFullYear(), selectedDate.getMonth(), 1));
+    if (selectedDate) {
+      setViewMonth(new Date(selectedDate.getFullYear(), selectedDate.getMonth(), 1));
+      setYearPageStart(Math.floor(selectedDate.getFullYear() / 12) * 12);
+    }
   }, [value]);
   useEffect(() => {
     if (!open) return;
@@ -9203,7 +10827,7 @@ function BrandedDateTimePicker({ value, onChange, selectedLabel = "Meeting time"
       const width = Math.min(320, Math.max(180, window.innerWidth - viewportPadding * 2));
       const maxLeft = Math.max(viewportPadding, window.innerWidth - width - viewportPadding);
       const left = Math.min(Math.max(viewportPadding, bounds.left), maxLeft);
-      const estimatedHeight = 315;
+    const estimatedHeight = 350;
       const opensAbove = bounds.bottom + estimatedHeight > window.innerHeight - viewportPadding && bounds.top > estimatedHeight + viewportPadding;
       setPopoverStyle(opensAbove
         ? { left, width, bottom: Math.max(viewportPadding, window.innerHeight - bounds.top + 8) }
@@ -9220,25 +10844,129 @@ function BrandedDateTimePicker({ value, onChange, selectedLabel = "Meeting time"
   const baseDate = selectedDate ?? new Date();
   const hour12 = ((baseDate.getHours() + 11) % 12) + 1;
   const meridiem = baseDate.getHours() >= 12 ? "PM" : "AM";
-  const monthTitle = new Intl.DateTimeFormat("en-PH", { month: "long", year: "numeric" }).format(viewMonth);
+  const monthName = new Intl.DateTimeFormat("en-PH", { month: "long" }).format(viewMonth);
+  const monthOptions = Array.from({ length: 12 }, (_, month) => ({
+    value: month,
+    label: new Intl.DateTimeFormat("en-PH", { month: "short" }).format(new Date(2020, month, 1)),
+  }));
+  const yearOptions = Array.from({ length: 12 }, (_, index) => yearPageStart + index);
   const displayValue = selectedDate
-    ? new Intl.DateTimeFormat("en-PH", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" }).format(selectedDate)
-    : "Choose date and time";
+    ? new Intl.DateTimeFormat("en-PH", dateOnly ? { month: "short", day: "numeric", year: "numeric" } : { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" }).format(selectedDate)
+    : dateOnly ? "Choose birthdate" : "Choose date and time";
   const firstDay = new Date(viewMonth.getFullYear(), viewMonth.getMonth(), 1).getDay();
   const daysInMonth = new Date(viewMonth.getFullYear(), viewMonth.getMonth() + 1, 0).getDate();
   const calendarDays = Array.from({ length: 42 }, (_, index) => new Date(viewMonth.getFullYear(), viewMonth.getMonth(), index - firstDay + 1));
   const todayKey = localDateKey(new Date());
+  const commitDate = (date: Date) => {
+    onChange(dateOnly ? localDateValue(date) : localDateTimeValue(date));
+  };
   const chooseDate = (date: Date) => {
+    if (latestDate && localDateKey(date) > localDateKey(latestDate)) return;
     const next = new Date(date.getFullYear(), date.getMonth(), date.getDate(), baseDate.getHours(), baseDate.getMinutes());
-    onChange(localDateTimeValue(next));
+    commitDate(next);
     setViewMonth(new Date(date.getFullYear(), date.getMonth(), 1));
+    setCalendarView("days");
+  };
+  const chooseMonth = (month: number) => {
+    const day = selectedDate ? calendarDayForMonth(viewMonth.getFullYear(), month, selectedDate.getDate()) : 1;
+    const next = new Date(viewMonth.getFullYear(), month, day, baseDate.getHours(), baseDate.getMinutes());
+    if (selectedDate) commitDate(next);
+    setViewMonth(next);
+    setCalendarView("days");
+  };
+  const chooseYear = (year: number) => {
+    if (latestDate && year > latestDate.getFullYear()) return;
+    const day = selectedDate ? calendarDayForMonth(year, viewMonth.getMonth(), selectedDate.getDate()) : 1;
+    const next = new Date(year, viewMonth.getMonth(), day, baseDate.getHours(), baseDate.getMinutes());
+    if (selectedDate) commitDate(next);
+    setViewMonth(new Date(year, viewMonth.getMonth(), 1));
+    setYearPageStart(Math.floor(year / 12) * 12);
+    setCalendarView("months");
   };
   const chooseTime = (nextHour12: number, nextMinute: number, nextMeridiem: string) => {
     const nextHour = (nextHour12 % 12) + (nextMeridiem === "PM" ? 12 : 0);
     const next = new Date(baseDate.getFullYear(), baseDate.getMonth(), baseDate.getDate(), nextHour, nextMinute);
     onChange(localDateTimeValue(next));
   };
-  return <div className="branded-datetime" ref={pickerRef}><div className="branded-datetime-trigger-row"><button type="button" className={`branded-datetime-trigger ${open ? "open" : ""} ${selectedDate ? "has-value" : ""}`} onClick={() => setOpen((current) => !current)} aria-expanded={open} aria-haspopup="dialog" aria-required={required}><span className="branded-datetime-icon"><CalendarDays size={16} /></span><span className="branded-datetime-copy"><strong>{displayValue}</strong><small>{selectedDate ? selectedLabel : emptyLabel}</small></span><ChevronDown size={16} className="branded-datetime-chevron" /></button>{selectedDate && <button type="button" className="branded-datetime-clear" onClick={() => onChange("")} aria-label={clearLabel}><X size={14} /></button>}</div>{open && popoverStyle && <div className="branded-datetime-popover" style={popoverStyle} role="dialog" aria-label="Choose date and time"><div className="branded-datetime-month"><button type="button" onClick={() => setViewMonth((current) => new Date(current.getFullYear(), current.getMonth() - 1, 1))} aria-label="Previous month"><ChevronLeft size={16} /></button><strong>{monthTitle}</strong><button type="button" onClick={() => setViewMonth((current) => new Date(current.getFullYear(), current.getMonth() + 1, 1))} aria-label="Next month"><ChevronRight size={16} /></button></div><div className="branded-datetime-weekdays">{["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"].map((day) => <span key={day}>{day}</span>)}</div><div className="branded-datetime-calendar">{calendarDays.map((date) => { const inMonth = date.getMonth() === viewMonth.getMonth(); const selected = selectedDate && localDateKey(date) === localDateKey(selectedDate); const today = localDateKey(date) === todayKey; return <button type="button" key={date.toISOString()} className={`${inMonth ? "" : "muted"} ${selected ? "selected" : ""} ${today ? "today" : ""}`} onClick={() => chooseDate(date)} aria-pressed={Boolean(selected)}>{date.getDate()}</button>; })}</div><div className="branded-datetime-time"><span>Time</span><select value={hour12} onChange={(event) => chooseTime(Number(event.target.value), baseDate.getMinutes(), meridiem)} aria-label="Hour">{Array.from({ length: 12 }, (_, index) => index + 1).map((hour) => <option value={hour} key={hour}>{String(hour).padStart(2, "0")}</option>)}</select><span>:</span><select value={baseDate.getMinutes()} onChange={(event) => chooseTime(hour12, Number(event.target.value), meridiem)} aria-label="Minute">{Array.from({ length: 12 }, (_, index) => index * 5).map((minute) => <option value={minute} key={minute}>{String(minute).padStart(2, "0")}</option>)}</select><select value={meridiem} onChange={(event) => chooseTime(hour12, baseDate.getMinutes(), event.target.value)} aria-label="AM or PM"><option>AM</option><option>PM</option></select></div><div className="branded-datetime-actions"><button type="button" onClick={() => { const now = new Date(); chooseDate(now); }} >Today</button><button type="button" className="primary" onClick={() => setOpen(false)}>Done</button></div></div>}</div>;
+  const toggleOpen = () => {
+    if (!open) setCalendarView("days");
+    setOpen((current) => !current);
+  };
+  return (
+    <div className="branded-datetime" ref={pickerRef}>
+      <div className="branded-datetime-trigger-row">
+        <button
+          type="button"
+          className={`branded-datetime-trigger ${open ? "open" : ""} ${selectedDate ? "has-value" : ""}`}
+          onClick={toggleOpen}
+          aria-expanded={open}
+          aria-haspopup="dialog"
+          aria-required={required}
+          aria-invalid={invalid}
+        >
+          <span className="branded-datetime-icon"><CalendarDays size={16} /></span>
+          <span className="branded-datetime-copy"><strong>{displayValue}</strong><small>{selectedDate ? selectedLabel : emptyLabel}</small></span>
+          <ChevronDown size={16} className="branded-datetime-chevron" />
+        </button>
+        {selectedDate && <button type="button" className="branded-datetime-clear" onClick={() => onChange("")} aria-label={clearLabel}><X size={14} /></button>}
+      </div>
+      {open && popoverStyle && (
+        <div className="branded-datetime-popover" style={popoverStyle} role="dialog" aria-label={dateOnly ? "Choose birthdate" : "Choose date and time"}>
+          <div className="branded-datetime-month">
+            <button type="button" onClick={() => setViewMonth((current) => new Date(current.getFullYear(), current.getMonth() - 1, 1))} aria-label="Previous month"><ChevronLeft size={16} /></button>
+            <div className="branded-datetime-period-selector">
+              <button type="button" className={calendarView === "months" ? "active" : ""} onClick={() => setCalendarView("months")} aria-label="Choose month" aria-pressed={calendarView === "months"}>{monthName}</button>
+              <button type="button" className={calendarView === "years" ? "active" : ""} onClick={() => { setYearPageStart(Math.floor(viewMonth.getFullYear() / 12) * 12); setCalendarView("years"); }} aria-label="Choose year" aria-pressed={calendarView === "years"}>{viewMonth.getFullYear()}</button>
+            </div>
+            <button type="button" onClick={() => setViewMonth((current) => new Date(current.getFullYear(), current.getMonth() + 1, 1))} aria-label="Next month"><ChevronRight size={16} /></button>
+          </div>
+          {calendarView === "days" ? (
+            <>
+              <div className="branded-datetime-weekdays">{["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"].map((day) => <span key={day}>{day}</span>)}</div>
+              <div className="branded-datetime-calendar">
+                {calendarDays.map((date) => {
+                  const inMonth = date.getMonth() === viewMonth.getMonth();
+                  const selected = Boolean(selectedDate && localDateKey(date) === localDateKey(selectedDate));
+                  const today = localDateKey(date) === todayKey;
+                  const disabled = Boolean(latestDate && localDateKey(date) > localDateKey(latestDate));
+                  return <button type="button" key={date.toISOString()} className={`${inMonth ? "" : "muted"} ${selected ? "selected" : ""} ${today ? "today" : ""}`} onClick={() => chooseDate(date)} aria-pressed={selected} aria-disabled={disabled} disabled={disabled}>{date.getDate()}</button>;
+                })}
+              </div>
+            </>
+          ) : calendarView === "months" ? (
+            <div className="branded-datetime-selector-panel" role="group" aria-label="Choose month">
+              <div className="branded-datetime-selector-heading"><strong>Choose a month</strong><span>{viewMonth.getFullYear()}</span></div>
+              <div className="branded-datetime-month-grid">
+                {monthOptions.map((month) => {
+                  const disabled = Boolean(latestDate && (viewMonth.getFullYear() > latestDate.getFullYear() || (viewMonth.getFullYear() === latestDate.getFullYear() && month.value > latestDate.getMonth())));
+                  return <button type="button" key={month.value} className={month.value === viewMonth.getMonth() ? "selected" : ""} onClick={() => chooseMonth(month.value)} disabled={disabled} aria-pressed={month.value === viewMonth.getMonth()}>{month.label}</button>;
+                })}
+              </div>
+            </div>
+          ) : (
+            <div className="branded-datetime-selector-panel" role="group" aria-label="Choose year">
+              <div className="branded-datetime-selector-heading">
+                <strong>Choose a year</strong>
+                <div className="branded-datetime-year-range">
+                  <button type="button" onClick={() => setYearPageStart((current) => current - 12)} aria-label="Previous years"><ChevronLeft size={14} /></button>
+                  <span>{yearPageStart}–{yearPageStart + 11}</span>
+                  <button type="button" onClick={() => setYearPageStart((current) => current + 12)} aria-label="Next years"><ChevronRight size={14} /></button>
+                </div>
+              </div>
+              <div className="branded-datetime-year-grid">
+                {yearOptions.map((year) => {
+                  const disabled = Boolean(latestDate && year > latestDate.getFullYear());
+                  return <button type="button" key={year} className={year === viewMonth.getFullYear() ? "selected" : ""} onClick={() => chooseYear(year)} disabled={disabled} aria-pressed={year === viewMonth.getFullYear()}>{year}</button>;
+                })}
+              </div>
+            </div>
+          )}
+          {!dateOnly && calendarView === "days" && <div className="branded-datetime-time"><span>Time</span><BrandedSelect value={String(hour12)} onChange={(value) => chooseTime(Number(value), baseDate.getMinutes(), meridiem)} ariaLabel="Hour" options={Array.from({ length: 12 }, (_, index) => { const hour = index + 1; return { value: String(hour), label: String(hour).padStart(2, "0") }; })} /><span>:</span><BrandedSelect value={String(baseDate.getMinutes())} onChange={(value) => chooseTime(hour12, Number(value), meridiem)} ariaLabel="Minute" options={Array.from({ length: 12 }, (_, index) => { const minute = index * 5; return { value: String(minute), label: String(minute).padStart(2, "0") }; })} /><BrandedSelect value={meridiem} onChange={(value) => chooseTime(hour12, baseDate.getMinutes(), value)} ariaLabel="AM or PM" options={[{ value: "AM", label: "AM" }, { value: "PM", label: "PM" }]} /></div>}
+          <div className="branded-datetime-actions"><button type="button" onClick={() => { const now = new Date(); chooseDate(now); }} disabled={Boolean(latestDate && localDateKey(new Date()) > localDateKey(latestDate))}>Today</button><button type="button" className="primary" onClick={() => { if (!selectedDate && calendarView !== "days") { setCalendarView("days"); return; } setOpen(false); }}>Done</button></div>
+        </div>
+      )}
+    </div>
+  );
 }
 
 type UserEditorValues = {
@@ -9333,7 +11061,7 @@ function UserManagementContent() {
         </div>
         <div className="user-management-toolbar">
           <label className="toolbar-search"><Search size={16} /><input value={searchDraft} placeholder="Search name or email" onChange={(event) => setSearchDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { setPage(1); setSearch(searchDraft.trim()); } }} /></label>
-          <select value={activeFilter} onChange={(event) => { setPage(1); setActiveFilter(event.target.value); }}><option value="all">All accounts</option><option value="true">Active only</option><option value="false">Inactive only</option></select>
+          <BrandedSelect value={activeFilter} onChange={(value) => { setPage(1); setActiveFilter(value); }} ariaLabel="Account status" options={[{ value: "all", label: "All accounts" }, { value: "true", label: "Active only" }, { value: "false", label: "Inactive only" }]} />
           <button className="button button-secondary" onClick={() => { setPage(1); setSearch(searchDraft.trim()); }}>Search</button>
         </div>
         {loading ? <Loading /> : users.length === 0 ? <EmptyState icon={UsersRound} title="No users found" text="Try another search or create the first account." /> : (
@@ -9357,7 +11085,7 @@ function UserEditorForm({ mode, user, onSubmit, onCancel }: { mode: "create" | "
   const [error, setError] = useState("");
   const toggleRole = (role: Role) => setValues((current) => { const roles = current.roles.includes(role) ? current.roles.filter((item) => item !== role) : [...current.roles, role]; return { ...current, roles, activeRole: roles.includes(current.activeRole) ? current.activeRole : (roles[0] ?? role) }; });
   const submit = async (event: FormEvent) => { event.preventDefault(); setBusy(true); setError(""); try { await onSubmit(values); } catch (e) { setError(errorMessage(e, "Unable to save user.")); } finally { setBusy(false); } };
-  return <form className="stack-form user-editor-form" onSubmit={submit}><div className="form-grid"><label><span>Full name</span><input required minLength={2} maxLength={160} value={values.displayName} onChange={(event) => setValues({ ...values, displayName: event.target.value })} placeholder="Enter full name" /></label><label><span>Email</span><input required type="email" maxLength={254} disabled={mode === "edit"} value={values.email} onChange={(event) => setValues({ ...values, email: event.target.value })} placeholder="Enter email address" /></label></div>{mode === "create" && <div className="user-editor-info"><CircleHelp size={16} /><span>A secure temporary password will be generated in the background and sent in the activation email. The user will change it on first sign-in.</span></div>}<fieldset className="role-editor"><legend>Assigned roles</legend><div className="role-card-grid">{userRoleCards.map(({ role, icon: RoleIcon }) => { const selected = values.roles.includes(role); return <label key={role} className={`role-card ${selected ? "selected" : ""}`}><input type="checkbox" checked={selected} onChange={() => toggleRole(role)} /><span className="role-card-icon"><RoleIcon size={17} /></span><span className="role-card-name">{roleLabel(role)}</span><span className="role-card-check">{selected ? <CheckCircle2 size={17} /> : <span />}</span></label>; })}</div></fieldset><label className="primary-role-field"><span>Primary role</span><small>Used as the default workspace after sign-in.</small><select value={values.activeRole} onChange={(event) => setValues({ ...values, activeRole: event.target.value as Role })}>{values.roles.map((role) => <option key={role} value={role}>{roleLabel(role)}</option>)}</select></label>{error && <div className="form-error" role="alert">{error}</div>}<div className="user-editor-actions"><button type="button" className="button button-secondary" onClick={onCancel}>Cancel</button><button className="button button-primary" disabled={busy || values.roles.length === 0}>{busy ? "Saving…" : mode === "create" ? "Create user & send invite" : "Save access"}</button></div></form>;
+  return <form className="stack-form user-editor-form" onSubmit={submit}><div className="form-grid"><label><span>Full name</span><input required minLength={2} maxLength={160} value={values.displayName} onChange={(event) => setValues({ ...values, displayName: event.target.value })} placeholder="Enter full name" /></label><label><span>Email</span><input required type="email" maxLength={254} disabled={mode === "edit"} value={values.email} onChange={(event) => setValues({ ...values, email: event.target.value })} placeholder="Enter email address" /></label></div>{mode === "create" && <div className="user-editor-info"><CircleHelp size={16} /><span>A secure temporary password will be generated in the background and sent in the activation email. The user will change it on first sign-in.</span></div>}<fieldset className="role-editor"><legend>Assigned roles</legend><div className="role-card-grid">{userRoleCards.map(({ role, icon: RoleIcon }) => { const selected = values.roles.includes(role); return <label key={role} className={`role-card ${selected ? "selected" : ""}`}><input type="checkbox" checked={selected} onChange={() => toggleRole(role)} /><span className="role-card-icon"><RoleIcon size={17} /></span><span className="role-card-name">{roleLabel(role)}</span><span className="role-card-check">{selected ? <CheckCircle2 size={17} /> : <span />}</span></label>; })}</div></fieldset><label className="primary-role-field"><span>Primary role</span><small>Used as the default workspace after sign-in.</small><BrandedSelect value={values.activeRole} onChange={(value) => setValues({ ...values, activeRole: value as Role })} ariaLabel="Primary role" options={values.roles.map((role) => ({ value: role, label: roleLabel(role) }))} /></label>{error && <div className="form-error" role="alert">{error}</div>}<div className="user-editor-actions"><button type="button" className="button button-secondary" onClick={onCancel}>Cancel</button><button className="button button-primary" disabled={busy || values.roles.length === 0}>{busy ? "Saving…" : mode === "create" ? "Create user & send invite" : "Save access"}</button></div></form>;
 }
 
 function PaymentPerformance({ payments }: { payments: { totalInvoiced: number; totalConfirmed: number; pendingCount: number; pendingAmount?: number } | null }) {
@@ -9684,8 +11412,8 @@ function EventsPage() {
         <section className="panel event-catalog-panel">
           <div className="event-toolbar">
             <label className="event-search"><Search size={15} /><input value={search} onChange={(event) => { setSearch(event.target.value); setEventPage(1); }} placeholder="Search events…" aria-label="Search events" /></label>
-            <select value={statusFilter} onChange={(event) => { setStatusFilter(event.target.value); setEventPage(1); }} aria-label="Filter by status"><option value="all">Status: All</option><option value="open">Open</option><option value="upcoming">Upcoming</option><option value="closed">Closed</option></select>
-            <select value={dateFilter} onChange={(event) => { setDateFilter(event.target.value); setEventPage(1); }} aria-label="Filter by date"><option value="all">Date: All</option><option value="month">This month</option><option value="next30">Next 30 days</option></select>
+            <BrandedSelect value={statusFilter} onChange={(value) => { setStatusFilter(value); setEventPage(1); }} ariaLabel="Filter by status" options={[{ value: "all", label: "Status: All" }, { value: "open", label: "Open" }, { value: "upcoming", label: "Upcoming" }, { value: "closed", label: "Closed" }]} />
+            <BrandedSelect value={dateFilter} onChange={(value) => { setDateFilter(value); setEventPage(1); }} ariaLabel="Filter by date" options={[{ value: "all", label: "Date: All" }, { value: "month", label: "This month" }, { value: "next30", label: "Next 30 days" }]} />
             <button type="button" className="event-filter-button" onClick={() => { setSearch(""); setStatusFilter("all"); setDateFilter("all"); setEventPage(1); }}><RefreshCw size={14} /> Reset</button>
           </div>
           <div className="event-table-head"><span>Event name</span><span>Schedule</span><span>Status</span><span>Prospects</span><span> </span></div>
@@ -9734,7 +11462,7 @@ function LeadDetailsEditForm({
 }) {
   const [form, setForm] = useState({
     fullName: lead.fullName,
-    age: lead.age?.toString() ?? "",
+    birthDate: lead.birthDate?.slice(0, 10) ?? "",
     contactNumber: lead.contactNumber,
     email: lead.email,
     sourceOfIncome: lead.sourceOfIncome,
@@ -9743,6 +11471,7 @@ function LeadDetailsEditForm({
     industry: lead.industry ?? "",
     meetingDateTime: lead.meetingDateTime?.slice(0, 16) ?? "",
     questionsConcerns: lead.questionsConcerns ?? "",
+    notes: lead.notes ?? "",
   });
   const [busy, setBusy] = useState(false);
   const [attempted, setAttempted] = useState(false);
@@ -9752,9 +11481,10 @@ function LeadDetailsEditForm({
     emailValue.length > 0 && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailValue);
   const invalidContactNumber =
     contactNumberValue.length > 0 && !/^[0-9+().\-\s]+$/.test(contactNumberValue);
-  const invalidAge =
-    form.age.trim().length > 0 &&
-    (!Number.isInteger(Number(form.age)) || Number(form.age) < 18 || Number(form.age) > 120);
+  const calculatedAge = calculatedAgeFromBirthDate(form.birthDate);
+  const invalidBirthDate =
+    form.birthDate.trim().length > 0 &&
+    (calculatedAge == null || calculatedAge < 18 || calculatedAge > 120);
   const missingFields = [
     form.fullName.trim().length < 2 ? "Full name" : null,
     form.address.trim().length < 5 ? "Franchisee address" : null,
@@ -9763,12 +11493,12 @@ function LeadDetailsEditForm({
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     setAttempted(true);
-    if (missingFields.length || invalidEmail || invalidContactNumber || invalidAge) return;
+    if (missingFields.length || invalidEmail || invalidContactNumber || invalidBirthDate) return;
     setBusy(true);
     try {
       await onSubmit({
         fullName: form.fullName.trim(),
-        age: form.age.trim() ? Number(form.age) : null,
+        birthDate: form.birthDate || null,
         contactNumber: contactNumberValue || null,
         email: emailValue || null,
         sourceOfIncome: form.sourceOfIncome.trim() || null,
@@ -9779,6 +11509,7 @@ function LeadDetailsEditForm({
           ? new Date(form.meetingDateTime).toISOString()
           : null,
         questionsConcerns: form.questionsConcerns.trim() || null,
+        notes: form.notes.trim() || null,
       });
     } finally {
       setBusy(false);
@@ -9787,14 +11518,14 @@ function LeadDetailsEditForm({
 
   return (
     <form className="form-grid lead-details-edit-form" onSubmit={submit} noValidate>
-      {attempted && (missingFields.length || invalidEmail || invalidContactNumber || invalidAge) ? (
+      {attempted && (missingFields.length || invalidEmail || invalidContactNumber || invalidBirthDate) ? (
         <div className="missing-fields-summary form-wide" role="alert">
           <strong>Please complete</strong>
           <span>
             {[...missingFields,
               ...(invalidEmail ? ["Email format"] : []),
               ...(invalidContactNumber ? ["Contact number format"] : []),
-              ...(invalidAge ? ["Age"] : []),
+              ...(invalidBirthDate ? ["Birthdate"] : []),
             ].join(", ")}
           </span>
         </div>
@@ -9812,16 +11543,27 @@ function LeadDetailsEditForm({
         />
       </label>
       <label>
-        <span>Age <span className="field-optional">(optional)</span></span>
-        <input
-          type="number"
-          min={18}
-          max={120}
-          value={form.age}
-          onChange={(event) => setForm((current) => ({ ...current, age: event.target.value }))}
-          aria-invalid={attempted && invalidAge}
-          className={attempted && invalidAge ? "field-missing" : undefined}
+        <span>Birthdate <span className="field-optional">(optional)</span></span>
+        <BrandedDateTimePicker
+          value={form.birthDate}
+          onChange={(birthDate) => setForm((current) => ({ ...current, birthDate }))}
+          dateOnly
+          maxDate={localDateValue(new Date())}
+          invalid={attempted && invalidBirthDate}
+          selectedLabel="Birthdate"
+          emptyLabel="Optional · choose birthdate"
+          clearLabel="Clear birthdate"
         />
+        {attempted && invalidBirthDate ? <small className="field-error">Enter a valid birthdate for an adult franchisee.</small> : null}
+      </label>
+      <label>
+        <span>Calculated age</span>
+        <input
+          value={calculatedAge == null ? "Enter a birthdate" : `${calculatedAge} years`}
+          readOnly
+          aria-readonly="true"
+        />
+        <small className="field-hint">Calculated automatically from the birthdate.</small>
       </label>
       <label>
         <span>Contact number <span className="field-optional">(optional)</span></span>
@@ -9901,6 +11643,17 @@ function LeadDetailsEditForm({
           placeholder="Capture any context the team should know."
         />
       </label>
+      <label className="form-wide">
+        <span>Internal notes <span className="field-optional">(optional)</span></span>
+        <textarea
+          rows={3}
+          maxLength={4000}
+          value={form.notes}
+          onChange={(event) => setForm((current) => ({ ...current, notes: event.target.value }))}
+          placeholder="Capture useful context for the assigned agent and General Manager, such as urgency, referral context, or the next thing to clarify."
+        />
+        <small className="field-hint">Keep this focused on information the internal team should remember.</small>
+      </label>
       <div className="form-actions form-wide">
         <button type="button" className="button button-secondary" onClick={onCancel} disabled={busy}>Cancel</button>
         <button className="button button-primary" disabled={busy}>
@@ -9920,11 +11673,13 @@ function LeadForm({
 }) {
   const [form, setForm] = useState({
     fullName: "",
+    birthDate: "",
     contactNumber: "",
     email: "",
     sourceOfIncome: "",
     address: "",
     preferredLocation: "",
+    notes: "",
     leadSource: "Manual",
     productLine: "",
     assignedAgentId: "",
@@ -9936,6 +11691,10 @@ function LeadForm({
   >([]);
   const emailValue = form.email.trim();
   const contactNumberValue = form.contactNumber.trim();
+  const calculatedAge = calculatedAgeFromBirthDate(form.birthDate);
+  const invalidBirthDate =
+    form.birthDate.trim().length > 0 &&
+    (calculatedAge == null || calculatedAge < 18 || calculatedAge > 120);
   const invalidEmail =
     emailValue.length > 0 &&
     !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailValue);
@@ -9971,15 +11730,18 @@ function LeadForm({
     if (
       missingFields.length > 0 ||
       invalidEmail ||
-      invalidContactNumber
+      invalidContactNumber ||
+      invalidBirthDate
     )
       return;
     setBusy(true);
     try {
       await onSubmit({
         ...form,
+        birthDate: form.birthDate || null,
         contactNumber: contactNumberValue || null,
         email: emailValue || null,
+        notes: form.notes.trim() || null,
         productLine: form.productLine || null,
         assignedAgentId: form.assignedAgentId || null,
       });
@@ -9990,11 +11752,12 @@ function LeadForm({
   return (
     <form className="form-grid" onSubmit={submit} noValidate>
       {attempted &&
-      (missingFields.length > 0 || invalidEmail || invalidContactNumber) ? (
+      (missingFields.length > 0 || invalidBirthDate || invalidEmail || invalidContactNumber) ? (
         <div className="missing-fields-summary form-wide" role="alert">
           <strong>Please complete</strong>
           <span>
             {[...missingFields,
+              ...(invalidBirthDate ? ["Birthdate"] : []),
               ...(invalidEmail ? ["Email format"] : []),
               ...(invalidContactNumber ? ["Contact number format"] : []),
             ].join(", ")}
@@ -10019,6 +11782,33 @@ function LeadForm({
         {attempted && !form.fullName.trim() ? (
           <small className="field-error">Full name is required.</small>
         ) : null}
+      </label>
+      <label>
+        <span>
+          Birthdate <span className="field-optional">(optional)</span>
+        </span>
+        <BrandedDateTimePicker
+          value={form.birthDate}
+          onChange={(birthDate) => setForm({ ...form, birthDate })}
+          dateOnly
+          maxDate={localDateValue(new Date())}
+          invalid={attempted && invalidBirthDate}
+          selectedLabel="Birthdate"
+          emptyLabel="Optional · choose birthdate"
+          clearLabel="Clear birthdate"
+        />
+        {attempted && invalidBirthDate ? (
+          <small className="field-error">Enter a valid birthdate for an adult franchisee.</small>
+        ) : null}
+      </label>
+      <label>
+        <span>Calculated age</span>
+        <input
+          value={calculatedAge == null ? "Enter a birthdate" : `${calculatedAge} years`}
+          readOnly
+          aria-readonly="true"
+        />
+        <small className="field-hint">Calculated automatically from the birthdate.</small>
       </label>
       <label>
         <span>
@@ -10093,60 +11883,76 @@ function LeadForm({
           />
         </label>
       </div>
+      <label className="form-wide">
+        <span>
+          Internal notes <span className="field-optional">(optional)</span>
+        </span>
+        <textarea
+          rows={3}
+          maxLength={4000}
+          value={form.notes}
+          onChange={(event) => setForm({ ...form, notes: event.target.value })}
+          placeholder="What should the assigned agent or General Manager know first? Include urgency, referral context, or the next thing to clarify."
+        />
+        <small className="field-hint">Internal context only — this is not sent to the franchisee.</small>
+      </label>
       <SourceOfIncomeField
         value={form.sourceOfIncome}
         onChange={(sourceOfIncome) => setForm({ ...form, sourceOfIncome })}
       />
       <label>
         Lead source
-        <select
+        <BrandedSelect
           required
           value={form.leadSource}
-          onChange={(e) => setForm({ ...form, leadSource: e.target.value })}
-        >
-          <option>Manual</option>
-          <option>Campaign</option>
-          <option>Social media</option>
-          <option>Lead form</option>
-          <option>Referral</option>
-        </select>
+          onChange={(value) => setForm({ ...form, leadSource: value })}
+          ariaLabel="Lead source"
+          options={[
+            { value: "Manual", label: "Manual" },
+            { value: "Campaign", label: "Campaign" },
+            { value: "Social media", label: "Social media" },
+            { value: "Lead form", label: "Lead form" },
+            { value: "Referral", label: "Referral" },
+          ]}
+        />
       </label>
       <label>
         Product line
-        <select
+        <BrandedSelect
           value={form.productLine}
-          onChange={(e) => setForm({ ...form, productLine: e.target.value })}
-        >
-          <option value="">Choose later</option>
-          <option value="Abc">Animal Bite Center</option>
-          <option value="Pharmacy">Pharmacy</option>
-          <option value="Combo">ABC + Pharmacy</option>
-        </select>
+          onChange={(value) => setForm({ ...form, productLine: value })}
+          ariaLabel="Product line"
+          options={[
+            { value: "", label: "Choose later" },
+            { value: "Abc", label: "Animal Bite Center" },
+            { value: "Pharmacy", label: "Pharmacy" },
+            { value: "Combo", label: "ABC + Pharmacy" },
+          ]}
+        />
       </label>
       {hasRole(session.user?.role, ["GeneralManager"]) && (
         <label>
           <span>
             Responsible owner <span className="required-mark">*</span>
           </span>
-          <select
+          <BrandedSelect
             required
             value={form.assignedAgentId}
-            onChange={(e) =>
-              setForm({ ...form, assignedAgentId: e.target.value })
-            }
-            aria-invalid={attempted && !form.assignedAgentId}
+            onChange={(value) => setForm({ ...form, assignedAgentId: value })}
+            invalid={attempted && !form.assignedAgentId}
             className={
               attempted && !form.assignedAgentId ? "field-missing" : undefined
             }
-          >
-            <option value="">Select owner</option>
-            {agents.map((agent) => (
-              <option value={agent.id} key={agent.id}>
-                {agent.displayName} — {roleLabel(agent.role as Role)}
-                {agent.id === session.user?.id ? " (You)" : ""}
-              </option>
-            ))}
-          </select>
+            ariaLabel="Responsible owner"
+            placeholder="Select owner"
+            options={[
+              { value: "", label: "Select owner" },
+              ...agents.map((agent) => ({
+                value: agent.id,
+                label: `${agent.displayName} — ${roleLabel(agent.role as Role)}${agent.id === session.user?.id ? " (You)" : ""}`,
+              })),
+            ]}
+          />
           {attempted && !form.assignedAgentId ? (
             <small className="field-error">Choose the responsible owner.</small>
           ) : null}
@@ -10192,12 +11998,12 @@ function ActivityForm({
     <form className="stack-form" onSubmit={submit} noValidate>
       <label>
         Activity type
-        <select value={type} onChange={(e) => setType(e.target.value)}>
-          <option>CALL</option>
-          <option>NOTE</option>
-          <option>EMAIL</option>
-          <option>MEETING</option>
-        </select>
+        <BrandedSelect
+          value={type}
+          onChange={setType}
+          ariaLabel="Activity type"
+          options={["CALL", "NOTE", "EMAIL", "MEETING"].map((option) => ({ value: option, label: option }))}
+        />
       </label>
       <label>
         <span>
@@ -10710,7 +12516,7 @@ function friendlyFieldLabel(field: string) {
   const name = field.split(".").at(-1) ?? field;
   const labels: Record<string, string> = {
     fullName: "Full name",
-    age: "Age",
+    birthDate: "Birthdate",
     contactNumber: "Contact number",
     email: "Email",
     sourceOfIncome: "Source of income",
@@ -10777,6 +12583,10 @@ function documentTypeLabel(type: string) {
   return (
     {
       VALID_ID_SIGNATURES: "Valid ID + 3 specimen signatures",
+      GENERATED_INVOICE: "Down payment invoice",
+      GENERATED_CONTRACT: "Generated franchise agreement",
+      ACKNOWLEDGEMENT_RECEIPT: "Down payment acknowledgement receipt",
+      BALANCE_ACKNOWLEDGEMENT_RECEIPT: "Balance payment acknowledgement receipt",
       FLOOR_PLAN: "Floor plan",
       PERSPECTIVE: "Perspective",
       SIGNED_CONTRACT: "Signed contract",
@@ -10804,6 +12614,7 @@ function activityLabel(type: string) {
       BalancePaymentConfirmed: "Balance payment confirmed",
       BalancePaymentReturned: "Balance payment returned",
       StateChanged: "Workflow state changed",
+      ContractSigningMethodSelected: "Signing method selected",
       DocumentUploaded: "Document uploaded",
       DocumentArchived: "Document archived",
       CallOutcomeRecorded: "Call outcome recorded",
@@ -10821,6 +12632,7 @@ function statusLabel(status: string) {
       NotStarted: "Not started",
       UploadPending: "Upload in progress",
       Uploaded: "Ready",
+      Generated: "Generated",
       Archived: "Archived",
       Pending: "Awaiting action",
       Invoiced: "Invoice generated",
