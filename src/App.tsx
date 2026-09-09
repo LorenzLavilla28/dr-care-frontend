@@ -7118,10 +7118,6 @@ function ContractPanel({
     : ["FLOOR_PLAN", "PERSPECTIVE"];
   const uploadedContractDocuments = requiredContractDocuments.filter((type) => contractDocuments.some((item) => item.documentType === type && item.status === "Uploaded"));
   const contractDocumentsComplete = uploadedContractDocuments.length === requiredContractDocuments.length;
-  const contractPrerequisites = [
-    !lead.address?.trim() ? "franchisee address" : null,
-    !lead.preferredLocation?.trim() ? "proposed franchise site" : null,
-  ].filter((item): item is string => Boolean(item));
   return (
     <section className="panel tab-panel">
       <PanelHeader
@@ -7241,11 +7237,6 @@ function ContractPanel({
         )}
         {!contract && canEditDraft && (
           <>
-            {contractPrerequisites.length > 0 && (
-              <div className="callout">
-                Add the {contractPrerequisites.join(" and ")} before generating the agreement. These details are optional while creating a new lead, but required for the contract.
-              </div>
-            )}
             <div className="inline-form">
               <label>
                 Contract template
