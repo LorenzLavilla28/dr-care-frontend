@@ -11,7 +11,7 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
-import { NavLink, Navigate, Route, Routes, useNavigate, useParams } from "react-router-dom";
+import { NavLink, Navigate, Route, Routes, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   Activity,
   AlertTriangle,
@@ -32,11 +32,14 @@ import {
   Crown,
   Clock3,
   Eraser,
+  Eye,
+  EyeOff,
   FileText,
   Filter,
   ImagePlus,
   LayoutDashboard,
   ListChecks,
+  LockKeyhole,
   LogOut,
   Menu,
   PanelLeftClose,
@@ -47,6 +50,7 @@ import {
   Search,
   Send,
   Settings,
+  ShieldAlert,
   ShieldCheck,
   Sparkles,
   Trash2,
@@ -71,6 +75,8 @@ import {
   type FinancePaymentItem,
   type FinanceWorkbenchResponse,
   type BalancePayment,
+  type CalendarProvider,
+  type CalendarProviderStatus,
   type PaymentAccount,
   type PaymentManagementItem,
   type PaymentManagementResponse,
@@ -112,6 +118,8 @@ function BrandedSelect({
   required = false,
   invalid = false,
   className,
+  menuClassName,
+  menuMinWidth,
   ariaLabel,
 }: {
   value: string;
@@ -123,6 +131,8 @@ function BrandedSelect({
   required?: boolean;
   invalid?: boolean;
   className?: string;
+  menuClassName?: string;
+  menuMinWidth?: number;
   ariaLabel?: string;
 }) {
   const selectId = useId().replaceAll(":", "");
@@ -167,6 +177,10 @@ function BrandedSelect({
       );
       const gap = 5;
       const viewportPadding = 8;
+      const menuWidth = Math.min(
+        Math.max(triggerRect.width, menuMinWidth ?? 0),
+        Math.max(triggerRect.width, window.innerWidth - viewportPadding * 2),
+      );
       const spaceAbove = Math.max(0, triggerRect.top - viewportPadding - gap);
       const spaceBelow = Math.max(0, window.innerHeight - triggerRect.bottom - viewportPadding - gap);
       const fitsAbove = spaceAbove >= menuHeight;
@@ -191,7 +205,7 @@ function BrandedSelect({
         : Math.min(unclampedTop, Math.max(viewportPadding, window.innerHeight - viewportPadding - visibleMenuHeight));
       const left = Math.min(
         Math.max(viewportPadding, triggerRect.left),
-        Math.max(viewportPadding, window.innerWidth - triggerRect.width - viewportPadding),
+        Math.max(viewportPadding, window.innerWidth - menuWidth - viewportPadding),
       );
 
       setResolvedPlacement((current) => current === nextPlacement ? current : nextPlacement);
@@ -199,7 +213,7 @@ function BrandedSelect({
         position: "fixed",
         top,
         left,
-        width: triggerRect.width,
+        width: menuWidth,
         maxHeight: visibleMenuHeight,
         zIndex: 1200,
         visibility: "visible",
@@ -214,7 +228,7 @@ function BrandedSelect({
       window.removeEventListener("resize", updatePlacement);
       window.removeEventListener("scroll", updatePlacement, true);
     };
-  }, [open, menuPlacement, options.length]);
+  }, [open, menuMinWidth, menuPlacement, options.length]);
 
   useEffect(() => {
     if (!open) return;
@@ -320,7 +334,7 @@ function BrandedSelect({
       {open && createPortal(
         <div
           ref={menuRef}
-          className={`branded-select-menu ${resolvedPlacement === "up" ? "branded-select-menu-up" : ""}`}
+          className={`branded-select-menu ${resolvedPlacement === "up" ? "branded-select-menu-up" : ""} ${menuClassName ?? ""}`}
           id={`${selectId}-listbox`}
           role="listbox"
           aria-label={ariaLabel}
@@ -328,7 +342,9 @@ function BrandedSelect({
             position: "fixed",
             top: triggerRef.current ? triggerRef.current.getBoundingClientRect().bottom + 5 : 0,
             left: triggerRef.current ? triggerRef.current.getBoundingClientRect().left : 0,
-            width: triggerRef.current ? triggerRef.current.getBoundingClientRect().width : 0,
+            width: triggerRef.current
+              ? Math.max(triggerRef.current.getBoundingClientRect().width, menuMinWidth ?? 0)
+              : menuMinWidth ?? 0,
             zIndex: 1200,
             visibility: "hidden",
           }}
@@ -1030,6 +1046,15 @@ function isMyOpportunity(lead: Lead, user: NonNullable<typeof session.user>) {
   return lead.assignedAgentId === user.id || isMyCurrentAction(lead, user);
 }
 
+function userHasCanonicalRole(user: UserRecord, role: Role) {
+  const roles = user.roles?.length ? user.roles : [user.role];
+  return roles.some((item) => canonicalRole(item) === canonicalRole(role));
+}
+
+function isActiveSalesAgent(user: UserRecord) {
+  return user.isActive && userHasCanonicalRole(user, "SalesAgent");
+}
+
 const nav: { label: string; to: string; icon: Icon; roles?: Role[] }[] = [
   {
     label: "Command center",
@@ -1137,6 +1162,7 @@ function hasRole(role: Role | undefined, roles: Role[]) {
   return allowed.has(canonicalRole(role));
 }
 function canOpenPath(role: Role, path: string) {
+  if (path === "/profile") return true;
   if (path.startsWith("/leads/")) return hasRole(role, leadReadRoles);
   if (path === "/pipeline") return hasRole(role, pipelineReadRoles);
   if (path === "/tasks") return hasRole(role, taskReadRoles);
@@ -1857,7 +1883,16 @@ function Shell({
             })}
         </nav>
         <div className="sidebar-bottom">
-          <div className="user-menu">
+          <div
+            className="user-menu"
+            role="button"
+            tabIndex={0}
+            title="Open profile"
+            onClick={() => navigate("/profile")}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" || event.key === " ") navigate("/profile");
+            }}
+          >
             <div className="avatar avatar-small">
               {initials(user.displayName)}
             </div>
@@ -1865,7 +1900,7 @@ function Shell({
               <strong>{user.displayName}</strong>
               <small>{roleLabel(user.role)}</small>
             </span>
-            <button className="icon-button sidebar-logout" onClick={onLogout} aria-label="Sign out">
+            <button className="icon-button sidebar-logout" onClick={(event) => { event.stopPropagation(); onLogout(); }} aria-label="Sign out">
               <LogOut size={16} />
             </button>
           </div>
@@ -1930,6 +1965,7 @@ function Shell({
             <Route path="/handoff" element={<EndorsementsQueue />} />
             <Route path="/reports" element={<Reports />} />
             <Route path="/events" element={<EventsPage />} />
+            <Route path="/profile" element={<ProfilePage user={user} onUserChanged={onUserChanged} />} />
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="/users" element={<UserManagementPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
@@ -2171,9 +2207,52 @@ function PipelineContent({
   const [leadView, setLeadView] = useState<"active" | "notInterested">("active");
   const [notice, setNotice] = useState<Notice | null>(null);
   const [filter, setFilter] = useState<PipelineFilter>("all");
+  const [assignedTo, setAssignedTo] = useState("all");
+  const [ownerOptions, setOwnerOptions] = useState<UserRecord[]>([]);
+  const [ownerLoading, setOwnerLoading] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(true);
   const boardRef = useRef<HTMLDivElement>(null);
   const canManageLeads = hasRole(user.role, leadWriteRoles);
+  const canFilterOwners = ["GeneralManager", "Leadership"].includes(
+    canonicalRole(user.role) ?? "",
+  );
+
+  useEffect(() => {
+    if (!canFilterOwners) {
+      setOwnerOptions([]);
+      setAssignedTo("all");
+      return;
+    }
+    let active = true;
+    setOwnerLoading(true);
+    api.users
+      .list("?page=1&pageSize=100&active=true")
+      .then((result) => {
+        if (!active) return;
+        const salesAgents = result.items.filter(isActiveSalesAgent);
+        setOwnerOptions(salesAgents);
+        setAssignedTo((current) =>
+          current === "all" || salesAgents.some((item) => item.id === current)
+            ? current
+            : "all",
+        );
+      })
+      .catch((e) => {
+        if (active) {
+          setNotice({
+            message: errorMessage(e, "Unable to load opportunity owners."),
+            tone: "error",
+          });
+        }
+      })
+      .finally(() => {
+        if (active) setOwnerLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [canFilterOwners]);
+
   useEffect(() => {
     let active = true;
     const query =
@@ -2197,7 +2276,10 @@ function PipelineContent({
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
   }, [leadView, realtimeRevision]);
-  const filtered = leads.filter((lead) => {
+  const ownerScopedLeads = leads.filter(
+    (lead) => assignedTo === "all" || lead.assignedAgentId === assignedTo,
+  );
+  const filtered = ownerScopedLeads.filter((lead) => {
     const matchesSearch =
       `${lead.fullName} ${lead.email} ${lead.preferredLocation ?? ""} ${lead.productLine ?? ""} ${lead.notInterestedReason ?? ""}`
         .toLowerCase()
@@ -2224,6 +2306,7 @@ function PipelineContent({
     }
   };
   const filteredLeadKey = filtered.map((lead) => lead.id).join(",");
+  const activeFilterCount = (filter === "all" ? 0 : 1) + (assignedTo === "all" ? 0 : 1);
   useEffect(() => {
     if (loading || view !== "board" || !filteredLeadKey) return;
     const frame = window.requestAnimationFrame(() => {
@@ -2241,7 +2324,7 @@ function PipelineContent({
     {
       value: "all",
       label: canonicalRole(user.role) === "SalesAgent" ? "My opportunities" : "All opportunities",
-      count: leads.length,
+      count: ownerScopedLeads.length,
     },
     ...(canonicalRole(user.role) === "SalesAgent"
       ? []
@@ -2249,18 +2332,18 @@ function PipelineContent({
           {
             value: "mine" as PipelineFilter,
             label: "My opportunities",
-            count: leads.filter((lead) => isMyOpportunity(lead, user)).length,
+            count: ownerScopedLeads.filter((lead) => isMyOpportunity(lead, user)).length,
           },
         ]),
     {
       value: "attention",
       label: "Needs attention",
-      count: leads.filter(isAttentionLead).length,
+      count: ownerScopedLeads.filter(isAttentionLead).length,
     },
     {
       value: "overdue",
       label: "Stale or overdue",
-      count: leads.filter(isOverdueLead).length,
+      count: ownerScopedLeads.filter(isOverdueLead).length,
     },
   ];
   return (
@@ -2290,14 +2373,38 @@ function PipelineContent({
             />
           </div>
           <button
-            className={`button button-secondary filter-toggle ${filtersOpen ? "active" : ""}`}
+            className={`button button-secondary filter-toggle ${filtersOpen || activeFilterCount > 0 ? "active" : ""}`}
             type="button"
             onClick={() => setFiltersOpen((value) => !value)}
             aria-expanded={filtersOpen}
             disabled={leadView === "notInterested"}
           >
             <Filter size={16} /> Filters
+            {activeFilterCount > 0 && <span className="filter-count-badge">{activeFilterCount}</span>}
           </button>
+          {canFilterOwners && (
+            <div
+              className={`pipeline-owner-filter ${assignedTo !== "all" ? "has-value" : ""} ${leadView === "notInterested" ? "is-disabled" : ""}`}
+            >
+              <UserRound size={15} aria-hidden="true" />
+              <span className="pipeline-owner-label">Assigned to:</span>
+              <BrandedSelect
+                value={assignedTo}
+                onChange={setAssignedTo}
+                disabled={leadView === "notInterested" || ownerLoading}
+                ariaLabel="Assigned to"
+                menuClassName="pipeline-owner-menu"
+                menuMinWidth={260}
+                options={[
+                  { value: "all", label: "All owners" },
+                  ...ownerOptions.map((owner) => ({
+                    value: owner.id,
+                    label: owner.displayName,
+                  })),
+                ]}
+              />
+            </div>
+          )}
           <div
             className="view-segmented"
             role="group"
@@ -2311,7 +2418,7 @@ function PipelineContent({
             </button>
             <button
               className={`view-toggle ${leadView === "notInterested" ? "active" : ""}`}
-              onClick={() => { setLeadView("notInterested"); setFilter("all"); setView("table"); }}
+              onClick={() => { setLeadView("notInterested"); setFilter("all"); setAssignedTo("all"); setView("table"); }}
             >
               Not interested
             </button>
@@ -2348,6 +2455,18 @@ function PipelineContent({
                 <span>{option.count}</span>
               </button>
             ))}
+            {activeFilterCount > 0 && (
+              <button
+                type="button"
+                className="quick-filter quick-filter-clear"
+                onClick={() => {
+                  setFilter("all");
+                  setAssignedTo("all");
+                }}
+              >
+                Clear filters
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -3098,6 +3217,7 @@ function LeadDetailContent() {
             leadId={lead.id}
             onSubmit={saveTask}
             submitLabel="Schedule follow-up"
+            taskType="LeadFollowUpCall"
           />
         </Modal>
       )}
@@ -3758,6 +3878,7 @@ function LegacyLeadDetail() {
             leadId={lead.id}
             onSubmit={saveTask}
             submitLabel="Create task"
+            taskType="LeadFollowUpCall"
           />
         </Modal>
       )}
@@ -5819,9 +5940,10 @@ function QualificationPanel({
 }) {
   const [notes, setNotes] = useState("");
   const [decision, setDecision] = useState<"qualified" | "follow_up" | "not_interested">(
-    "qualified",
+    lead.state === "FollowUp" ? "follow_up" : "qualified",
   );
   const [followUpAt, setFollowUpAt] = useState("");
+  const followUpAtDirtyRef = useRef(false);
   const [version, setVersion] = useState(lead.version);
   const [busy, setBusy] = useState(false);
   const [productLine, setProductLine] = useState(lead.productLine ?? "");
@@ -5839,9 +5961,20 @@ function QualificationPanel({
   );
 
   useEffect(() => {
+    followUpAtDirtyRef.current = false;
+    setFollowUpAt("");
+  }, [lead.id]);
+
+  useEffect(() => {
+    setDecision(lead.state === "FollowUp" ? "follow_up" : "qualified");
+  }, [lead.id, lead.state]);
+
+  useEffect(() => {
+    let active = true;
     api.leads
       .getNurturing(lead.id)
       .then((value) => {
+        if (!active) return;
         const record = value as {
           notes?: string;
           version?: number;
@@ -5866,27 +5999,64 @@ function QualificationPanel({
         });
         setNurturingSaved(
           Boolean(
-            (record.productLine ?? lead.productLine) &&
-            (record.lastCallOutcome ?? lead.lastCallOutcome),
+            record.notes?.trim() ||
+            record.productLine ||
+            record.lastCallOutcome?.trim() ||
+            lead.productLine ||
+            lead.lastCallOutcome?.trim(),
           ),
         );
       })
-      .catch(() => setVersion(lead.version));
-  }, [lead.id, lead.version]);
+      .catch(() => {
+        if (active) setVersion(lead.version);
+      });
+    api.leads
+      .tasks(lead.id)
+      .then((tasks) => {
+        if (!active || followUpAtDirtyRef.current) return;
+        const followUpTask = tasks
+          .filter(
+            (task) =>
+              task.status === "Open" &&
+              task.taskType === "LeadFollowUpCall" &&
+              Boolean(task.dueAt),
+          )
+          .sort((left, right) => {
+            const leftCreatedAt = new Date(left.createdAt).getTime();
+            const rightCreatedAt = new Date(right.createdAt).getTime();
+            return rightCreatedAt - leftCreatedAt;
+          })[0];
+        setFollowUpAt(
+          lead.state === "FollowUp" && followUpTask?.dueAt
+            ? localDateTimeValue(new Date(followUpTask.dueAt))
+            : "",
+        );
+      })
+      .catch(() => {
+        if (active && lead.state !== "FollowUp") setFollowUpAt("");
+      });
+    return () => {
+      active = false;
+    };
+  }, [lead.id, lead.state, lead.version]);
 
   const persistNurturingDetails = async () => {
+    const normalizedProductLine = productLine || null;
+    const normalizedCallOutcome = callOutcome.trim();
     await api.leads.updateNurturing(lead.id, {
       notes: notes.trim() || null,
-      productLine,
-      actualPrice: actualPrice ? Number(actualPrice) : null,
+      productLine: normalizedProductLine,
+      actualPrice: normalizedProductLine && actualPrice ? Number(actualPrice) : null,
       expectedVersion: version,
     });
     const refreshed = await api.leads.get(lead.id);
-    await api.leads.recordCallOutcome(lead.id, {
-      outcome: callOutcome.trim(),
-      notes: notes.trim() || null,
-      expectedVersion: refreshed.version,
-    });
+    if (normalizedCallOutcome) {
+      await api.leads.recordCallOutcome(lead.id, {
+        outcome: normalizedCallOutcome,
+        notes: notes.trim() || null,
+        expectedVersion: refreshed.version,
+      });
+    }
     const latest = (await api.leads.getNurturing(lead.id)) as {
       version: number;
     };
@@ -5896,13 +6066,21 @@ function QualificationPanel({
   };
 
   const saveNurturing = async () => {
+    const requiresQualificationDetails = decision === "qualified";
     const missing = [
-      !productLine ? "Product line" : null,
-      !callOutcome.trim() ? "Call outcome" : null,
+      requiresQualificationDetails && !productLine ? "Product line" : null,
+      requiresQualificationDetails && !callOutcome.trim() ? "Call outcome" : null,
     ].filter((item): item is string => Boolean(item));
     if (missing.length) {
       onNotice({
         message: `Please complete: ${missing.join(", ")}.`,
+        tone: "error",
+      });
+      return;
+    }
+    if (!productLine && !callOutcome.trim() && !notes.trim() && !actualPrice) {
+      onNotice({
+        message: "Add a note, product line, call outcome, or agreed price before saving nurturing details.",
         tone: "error",
       });
       return;
@@ -5928,9 +6106,10 @@ function QualificationPanel({
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     const markingNotInterested = decision === "not_interested";
+    const requiresQualificationDetails = decision === "qualified";
     const missing = [
-      !markingNotInterested && !productLine ? "Product line" : null,
-      !markingNotInterested && !callOutcome.trim() ? "Call outcome" : null,
+      requiresQualificationDetails && !productLine ? "Product line" : null,
+      requiresQualificationDetails && !callOutcome.trim() ? "Call outcome" : null,
       !notes.trim()
         ? markingNotInterested
           ? "Reason for marking not interested"
@@ -6053,14 +6232,16 @@ function QualificationPanel({
       {decision !== "not_interested" && <div className="workflow-instructions">
         <strong>How to complete this step</strong>
         <span>
-          1. Review the system-tracked welcome email delivery and record the call outcome.
+          1. Review the system-tracked welcome email delivery and record the call outcome{decision === "qualified" ? "." : " when available."}
         </span>
-        <span>2. Select the franchise product and agreed price.</span>
+        <span>2. {decision === "qualified"
+          ? "Select the franchise product and agreed price."
+          : "Add the franchise product and call details when they become available (optional for this follow-up)."}</span>
         <span>
           3. Save the nurturing details, then qualify or create a follow-up.
         </span>
       </div>}
-      {decision !== "not_interested" && [
+      {decision === "qualified" && [
         !productLine ? "Product line" : null,
         !callOutcome.trim() ? "Call outcome" : null,
       ].some(Boolean) ? (
@@ -6079,16 +6260,17 @@ function QualificationPanel({
       {decision !== "not_interested" && <div className="process-card">
         <div className="form-grid">
           <label>
-            Product line
+            <span>Product line {decision === "qualified" ? <span className="required-mark">*</span> : <span className="field-optional">(optional for follow-up)</span>}</span>
             <BrandedSelect
               value={productLine}
               onChange={(value) => {
                 setProductLine(value as ProductLine | "");
+                if (!value) setActualPrice("");
                 setNurturingSaved(false);
               }}
-              required
-              className={!productLine ? "field-missing" : undefined}
-              invalid={!productLine}
+              required={decision === "qualified"}
+              className={decision === "qualified" && !productLine ? "field-missing" : undefined}
+              invalid={decision === "qualified" && !productLine}
               ariaLabel="Product line"
               placeholder="Select product"
               options={[
@@ -6100,20 +6282,21 @@ function QualificationPanel({
             />
           </label>
           <label>
-            Agreed actual price
+            <span>Agreed actual price <span className="field-optional">(optional)</span></span>
             <input
               type="number"
               min="1"
+              disabled={!productLine}
               value={actualPrice}
               onChange={(e) => {
                 setActualPrice(e.target.value);
                 setNurturingSaved(false);
               }}
-              placeholder="Defaults to the product list price"
+              placeholder={productLine ? "Defaults to the product list price" : "Select a product first"}
             />
           </label>
           <label>
-            Call outcome
+            <span>Call outcome {decision === "qualified" ? <span className="required-mark">*</span> : <span className="field-optional">(optional for follow-up)</span>}</span>
             <input
               value={callOutcome}
               onChange={(e) => {
@@ -6122,9 +6305,9 @@ function QualificationPanel({
               }}
               maxLength={40}
               placeholder="Interested, follow-up, not available…"
-              required
-              aria-invalid={!callOutcome.trim()}
-              className={!callOutcome.trim() ? "field-missing" : undefined}
+              required={decision === "qualified"}
+              aria-invalid={decision === "qualified" && !callOutcome.trim()}
+              className={decision === "qualified" && !callOutcome.trim() ? "field-missing" : undefined}
             />
           </label>
           <div className={`system-status-field ${welcomeDelivery.status.toLowerCase()}`}>
@@ -6155,7 +6338,10 @@ function QualificationPanel({
           {decision === "not_interested" ? "Reason for marking not interested" : "Contact and assessment notes"}
           <textarea
             value={notes}
-            onChange={(e) => setNotes(e.target.value)}
+            onChange={(e) => {
+              setNotes(e.target.value);
+              setNurturingSaved(false);
+            }}
             required
             aria-invalid={!notes.trim()}
             className={!notes.trim() ? "field-missing" : undefined}
@@ -6191,7 +6377,10 @@ function QualificationPanel({
             Follow-up date and time
             <BrandedDateTimePicker
               value={followUpAt}
-              onChange={setFollowUpAt}
+              onChange={(value) => {
+                followUpAtDirtyRef.current = true;
+                setFollowUpAt(value);
+              }}
               selectedLabel="Follow-up scheduled"
               emptyLabel="Required · choose a date and time"
               required
@@ -11123,6 +11312,271 @@ function PaymentPerformance({ payments }: { payments: { totalInvoiced: number; t
   return <section className="panel report-panel payment-performance"><PanelHeader title="Payment performance" subtitle="A single view of invoiced, collected, and outstanding cash." /><div className="payment-performance-total"><strong>{payments ? `₱${confirmed.toLocaleString()}` : "—"}</strong><span>Confirmed collections</span></div><div className="payment-performance-stats"><Info label="Invoiced" value={payments ? `₱${invoiced.toLocaleString()}` : "—"} /><Info label="Confirmed" value={payments ? `₱${confirmed.toLocaleString()}` : "—"} /><Info label="Pending" value={payments ? `₱${(payments.pendingAmount ?? 0).toLocaleString()}` : "—"} /></div><div className="collection-rate"><strong>Collection rate: {collectionRate}%</strong><span>{payments?.pendingCount ?? 0} payment(s) awaiting confirmation</span></div></section>;
 }
 
+function ProfilePage({ user, onUserChanged }: { user: NonNullable<typeof session.user>; onUserChanged: (user: NonNullable<typeof session.user>) => void }) {
+  const [searchParams] = useSearchParams();
+  const [connections, setConnections] = useState<CalendarProviderStatus[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [busyProvider, setBusyProvider] = useState<CalendarProvider | null>(null);
+  const [consentProvider, setConsentProvider] = useState<CalendarProvider | null>(null);
+  const [consentAccepted, setConsentAccepted] = useState(false);
+  const [disconnectProvider, setDisconnectProvider] = useState<CalendarProvider | null>(null);
+  const [passwordOpen, setPasswordOpen] = useState(false);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      setConnections(await api.calendar.connections());
+    } catch (e) {
+      setError(errorMessage(e, "Unable to load calendar connections."));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void load();
+    const status = searchParams.get("status");
+    const provider = searchParams.get("calendar");
+    if (status === "connected") setNotice(`${provider === "microsoft" ? "Outlook" : "Google Calendar"} is connected. Scheduled lead follow-up calls will sync shortly.`);
+    if (status === "error") setError(searchParams.get("message") || "Calendar connection was not completed.");
+    if (status) window.history.replaceState({}, "", window.location.pathname);
+  }, [searchParams]);
+
+  const connect = async (provider: CalendarProvider) => {
+    setBusyProvider(provider);
+    setError("");
+    try {
+      const result = await api.calendar.authorize(provider);
+      window.location.assign(result.authorizationUrl);
+    } catch (e) {
+      setError(errorMessage(e, `Unable to connect ${provider === "Microsoft" ? "Outlook" : "Google Calendar"}.`));
+      setBusyProvider(null);
+    }
+  };
+
+  const requestConnect = (provider: CalendarProvider) => {
+    setError("");
+    setConsentAccepted(false);
+    setConsentProvider(provider);
+  };
+
+  const confirmConnect = () => {
+    if (!consentProvider || !consentAccepted) return;
+    const provider = consentProvider;
+    setConsentProvider(null);
+    setConsentAccepted(false);
+    void connect(provider);
+  };
+
+  const requestDisconnect = (provider: CalendarProvider) => {
+    setError("");
+    setDisconnectProvider(provider);
+  };
+
+  const disconnect = async () => {
+    if (!disconnectProvider) return;
+    const provider = disconnectProvider;
+    setDisconnectProvider(null);
+    setBusyProvider(provider);
+    setError("");
+    try {
+      await api.calendar.disconnect(provider);
+      setNotice(`${provider === "Microsoft" ? "Outlook" : "Google Calendar"} disconnected. Existing synced follow-up events are being removed.`);
+      await load();
+    } catch (e) {
+      setError(errorMessage(e, "Unable to disconnect the calendar."));
+    } finally {
+      setBusyProvider(null);
+    }
+  };
+
+  const providerCard = (provider: CalendarProvider) => {
+    const item = connections.find((connection) => connection.provider === provider);
+    const label = provider === "Microsoft" ? "Outlook / Microsoft 365" : "Google Calendar";
+    const configured = item?.configured ?? false;
+    const connected = item?.connected ?? false;
+    return (
+      <article className={`profile-calendar-row ${connected ? "is-connected" : ""}`} key={provider}>
+        <div className="profile-calendar-service">
+          <div className={`profile-calendar-logo ${provider === "Microsoft" ? "microsoft" : "google"}`}>{provider === "Microsoft" ? <BriefcaseBusiness size={18} /> : <CalendarDays size={18} />}</div>
+          <div className="profile-calendar-copy">
+            <h3>{label}</h3>
+            <p>{connected ? item?.accountDisplayName || "Connected account" : provider === "Microsoft" ? "Connect your Microsoft 365 or Outlook calendar." : "Sync scheduled follow-up calls from your Google Calendar."}</p>
+          </div>
+        </div>
+        <div className="profile-calendar-row-actions">
+          <span className={`profile-calendar-status ${connected ? "connected" : ""}`}><span className="profile-calendar-status-dot" />{connected ? "Connected" : configured ? "Not connected" : "Unavailable"}</span>
+          <div className="profile-calendar-buttons">
+            {!connected && <button className="button button-primary" disabled={!configured || busyProvider !== null} onClick={() => requestConnect(provider)}>
+              {busyProvider === provider ? "Connecting…" : "Connect"}
+            </button>}
+            {connected && <button className="button button-secondary profile-calendar-disconnect" disabled={busyProvider !== null} onClick={() => requestDisconnect(provider)}>Disconnect</button>}
+          </div>
+        </div>
+        {item?.lastError && <div className="form-error profile-calendar-row-error">Last sync issue: {item.lastError}</div>}
+      </article>
+    );
+  };
+
+  return (
+    <Page title="Profile & settings" subtitle="Manage your account, calendar connections, and sign-in security.">
+      <div className="profile-layout">
+        <section className="panel profile-information-card">
+          <div className="profile-account-card">
+            <div className="profile-account-avatar avatar">{initials(user.displayName)}</div>
+            <div className="profile-account-details">
+              <h3>{user.displayName}</h3>
+              <p className="muted">{user.email}</p>
+              <span className="profile-role-pill">{roleLabel(user.role)}</span>
+            </div>
+            <span className="profile-active-pill"><CheckCircle2 size={14} /> Account active</span>
+          </div>
+        </section>
+        <section className="panel profile-calendar-section">
+          <div className="profile-section-heading profile-calendar-heading">
+            <div>
+              <h2>Calendar connections</h2>
+              <p>Connect your work calendar so Dr. Care can sync scheduled lead follow-up calls.</p>
+            </div>
+          </div>
+          {notice && <div className="success-banner">{notice}</div>}
+          {error && <div className="form-error" role="alert">{error}</div>}
+          {loading ? <Loading /> : <div className="profile-calendar-grid">{providerCard("Google")}{providerCard("Microsoft")}</div>}
+        </section>
+        <section className="panel profile-security-section">
+          <div className="profile-security-row">
+            <div className="profile-security-icon"><LockKeyhole size={20} /></div>
+            <div className="profile-security-copy">
+              <span className="eyebrow">PASSWORD & SECURITY</span>
+              <h2>Keep your account secure</h2>
+              <p className="muted">Use a strong password and update it whenever you need to.</p>
+            </div>
+            <div className="profile-security-value"><span>Password</span><strong>••••••••••••</strong></div>
+            <button type="button" className="button button-secondary profile-password-button" onClick={() => { setError(""); setPasswordOpen(true); }}>Change password</button>
+          </div>
+        </section>
+      </div>
+      {consentProvider && <Modal
+        title={`Connect ${consentProvider === "Microsoft" ? "Outlook / Microsoft 365" : "Google Calendar"}`}
+        subtitle="Review the calendar access before continuing."
+        onClose={() => { if (busyProvider === null) { setConsentProvider(null); setConsentAccepted(false); } }}
+      >
+        <div className="calendar-consent-modal-copy">
+          <ShieldCheck size={20} />
+          <div>
+            <strong>Only scheduled lead follow-up calls will be synced</strong>
+            <p>Dr. Care can create, update, and remove follow-up call events in your selected calendar. Operational tasks and other due dates will stay in Dr. Care.</p>
+          </div>
+        </div>
+        <label className="calendar-consent-check">
+          <input type="checkbox" checked={consentAccepted} onChange={(event) => setConsentAccepted(event.target.checked)} />
+          <span>I understand and allow Dr. Care to sync my scheduled lead follow-up calls with this calendar.</span>
+        </label>
+        <div className="form-actions calendar-consent-actions">
+          <button type="button" className="button button-secondary" onClick={() => { setConsentProvider(null); setConsentAccepted(false); }}>Cancel</button>
+          <button type="button" className="button button-primary" disabled={!consentAccepted} onClick={confirmConnect}>Continue to {consentProvider === "Microsoft" ? "Microsoft" : "Google"}</button>
+        </div>
+      </Modal>}
+      {disconnectProvider && <Modal
+        className="calendar-disconnect-modal"
+        headingIcon={<ShieldAlert size={20} />}
+        title={`Disconnect ${disconnectProvider === "Microsoft" ? "Outlook / Microsoft 365" : "Google Calendar"}?`}
+        onClose={() => { if (busyProvider === null) setDisconnectProvider(null); }}
+      >
+        <div className="calendar-disconnect-copy">
+          <p>Dr. Care follow-up events synced to your {disconnectProvider === "Microsoft" ? "Outlook / Microsoft 365 calendar" : "Google Calendar"} will be removed from that calendar.</p>
+          <p>Your Dr. Care records will not be deleted.</p>
+        </div>
+        <div className="form-actions calendar-disconnect-actions">
+          <button type="button" className="button button-secondary" onClick={() => setDisconnectProvider(null)} disabled={busyProvider !== null}>Cancel</button>
+          <button type="button" className="button button-primary" onClick={() => void disconnect()} disabled={busyProvider !== null}>
+            {busyProvider === disconnectProvider ? "Disconnecting…" : "Disconnect"}
+          </button>
+        </div>
+      </Modal>}
+      {passwordOpen && <PasswordChangeModal onClose={() => setPasswordOpen(false)} onComplete={(next) => { onUserChanged(next); setNotice("Your password was updated successfully."); setError(""); }} />}
+    </Page>
+  );
+}
+
+function PasswordField({ label, value, onChange, visible, onToggle, autoComplete, autoFocus = false }: { label: string; value: string; onChange: (value: string) => void; visible: boolean; onToggle: () => void; autoComplete: string; autoFocus?: boolean }) {
+  return <label className="password-field"><span>{label}</span><div className="password-input-wrap"><input required maxLength={128} type={visible ? "text" : "password"} autoComplete={autoComplete} autoFocus={autoFocus} value={value} onChange={(event) => onChange(event.target.value)} /><button type="button" className="password-visibility" onClick={onToggle} aria-label={`${visible ? "Hide" : "Show"} ${label}`} title={`${visible ? "Hide" : "Show"} ${label}`}>{visible ? <EyeOff size={17} /> : <Eye size={17} />}</button></div></label>;
+}
+
+function PasswordChangeModal({ onClose, onComplete }: { onClose: () => void; onComplete: (user: NonNullable<typeof session.user>) => void }) {
+  const [step, setStep] = useState<"verify" | "set">("verify");
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmation, setConfirmation] = useState("");
+  const [showCurrent, setShowCurrent] = useState(false);
+  const [showNew, setShowNew] = useState(false);
+  const [showConfirmation, setShowConfirmation] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const requirements = [
+    { label: "12+ characters", valid: newPassword.length >= 12 },
+    { label: "Uppercase letter", valid: /[A-Z]/.test(newPassword) },
+    { label: "Number", valid: /\d/.test(newPassword) },
+    { label: "Special character", valid: /[^A-Za-z0-9]/.test(newPassword) },
+  ];
+
+  const verify = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!currentPassword) return;
+    setBusy(true);
+    setError("");
+    try {
+      await api.auth.verifyPassword(currentPassword);
+      setStep("set");
+    } catch (e) {
+      setError(errorMessage(e, "The current password could not be verified."));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const update = async (event: FormEvent) => {
+    event.preventDefault();
+    setError("");
+    if (requirements.some((requirement) => !requirement.valid)) {
+      setError("Meet all password requirements before updating your password.");
+      return;
+    }
+    if (newPassword !== confirmation) {
+      setError("The new passwords do not match.");
+      return;
+    }
+    setBusy(true);
+    try {
+      const response = await api.auth.changePassword({ currentPassword, newPassword });
+      session.set(response);
+      onComplete(response.user);
+      onClose();
+    } catch (e) {
+      setError(errorMessage(e, "Unable to change your password."));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return <Modal className="password-change-modal" headingIcon={<ShieldCheck size={20} />} title={step === "verify" ? "Change password" : "Create a new password"} subtitle={step === "verify" ? "First, confirm your current password before creating a new one." : "Choose a strong password for your Dr. Care account."} onClose={() => { if (!busy) onClose(); }}>
+    {step === "verify" ? <form className="password-change-form" onSubmit={verify}>
+      <PasswordField label="Current password" value={currentPassword} onChange={setCurrentPassword} visible={showCurrent} onToggle={() => setShowCurrent((value) => !value)} autoComplete="current-password" autoFocus />
+      {error && <div className="form-error" role="alert">{error}</div>}
+      <div className="form-actions password-modal-actions"><button type="button" className="button button-secondary" onClick={onClose} disabled={busy}>Cancel</button><button className="button button-primary" disabled={busy || !currentPassword}>{busy ? "Verifying…" : "Continue"}<ArrowUpRight size={15} /></button></div>
+    </form> : <form className="password-change-form" onSubmit={update}>
+      <PasswordField label="New password" value={newPassword} onChange={setNewPassword} visible={showNew} onToggle={() => setShowNew((value) => !value)} autoComplete="new-password" autoFocus />
+      <PasswordField label="Confirm new password" value={confirmation} onChange={setConfirmation} visible={showConfirmation} onToggle={() => setShowConfirmation((value) => !value)} autoComplete="new-password" />
+      <div className="password-requirements" aria-live="polite">{requirements.map((requirement) => <span key={requirement.label} className={requirement.valid ? "valid" : ""}>{requirement.valid ? <CheckCircle2 size={14} /> : <span className="password-requirement-dot" />} {requirement.label}</span>)}</div>
+      {confirmation && <div className={`password-match ${newPassword === confirmation ? "valid" : "invalid"}`}>{newPassword === confirmation ? "Passwords match." : "Passwords do not match."}</div>}
+      {error && <div className="form-error" role="alert">{error}</div>}
+      <div className="form-actions password-modal-actions"><button type="button" className="button button-secondary" onClick={() => { setStep("verify"); setError(""); }} disabled={busy}>Back</button><button className="button button-primary" disabled={busy}>{busy ? "Updating…" : "Update password"}</button></div>
+    </form>}
+  </Modal>;
+}
+
 function SettingsPage() {
   if (!hasRole(session.user?.role, ["GeneralManager", "Leadership"]))
     return <Navigate to="/" replace />;
@@ -12062,10 +12516,12 @@ function TaskForm({
   leadId,
   onSubmit,
   submitLabel,
+  taskType = "Operational",
 }: {
   leadId?: string;
   onSubmit: (payload: unknown) => Promise<void>;
   submitLabel: string;
+  taskType?: "Operational" | "LeadFollowUpCall";
 }) {
   const [title, setTitle] = useState("");
   const [dueAt, setDueAt] = useState("");
@@ -12074,13 +12530,14 @@ function TaskForm({
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     setAttempted(true);
-    if (!title.trim()) return;
+    if (title.trim().length < 2) return;
     setBusy(true);
     try {
       await onSubmit({
         title,
         leadId: leadId || null,
         dueAt: dueAt ? new Date(dueAt).toISOString() : null,
+        taskType,
       });
     } finally {
       setBusy(false);
@@ -12099,11 +12556,11 @@ function TaskForm({
           value={title}
           onChange={(e) => setTitle(e.target.value)}
           placeholder="Follow up with franchisee"
-          aria-invalid={attempted && !title.trim()}
-          className={attempted && !title.trim() ? "field-missing" : undefined}
+          aria-invalid={attempted && title.trim().length < 2}
+          className={attempted && title.trim().length < 2 ? "field-missing" : undefined}
         />
-        {attempted && !title.trim() ? (
-          <small className="field-error">Task title is required.</small>
+        {attempted && title.trim().length < 2 ? (
+          <small className="field-error">Task title must be at least 2 characters.</small>
         ) : null}
       </label>
       <label>
@@ -12210,11 +12667,15 @@ function Modal({
   title,
   subtitle,
   onClose,
+  headingIcon,
+  className,
   children,
 }: {
   title: string;
   subtitle?: string;
   onClose: () => void;
+  headingIcon?: ReactNode;
+  className?: string;
   children: ReactNode;
 }) {
   useEffect(() => {
@@ -12229,15 +12690,18 @@ function Modal({
       onMouseDown={(event) => event.target === event.currentTarget && onClose()}
     >
       <section
-        className="modal"
+        className={`modal${className ? ` ${className}` : ""}`}
         role="dialog"
         aria-modal="true"
         aria-labelledby="modal-title"
       >
         <div className="modal-header">
-          <div>
-            <h2 id="modal-title">{title}</h2>
-            {subtitle && <p>{subtitle}</p>}
+          <div className={`modal-heading-content${headingIcon ? " has-icon" : ""}`}>
+            {headingIcon && <span className="modal-heading-icon">{headingIcon}</span>}
+            <div>
+              <h2 id="modal-title">{title}</h2>
+              {subtitle && <p>{subtitle}</p>}
+            </div>
           </div>
           <button
             className="icon-button"

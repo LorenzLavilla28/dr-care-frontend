@@ -27,6 +27,7 @@ export type LeadState =
   | "Acknowledged"
   | "NotInterested";
 export type ProductLine = "Abc" | "Pharmacy" | "Combo";
+export type CalendarProvider = "Google" | "Microsoft";
 
 export interface UserProfile {
   id: string;
@@ -36,6 +37,15 @@ export interface UserProfile {
   role: Role;
   roles?: Role[];
   mustChangePassword?: boolean;
+}
+export interface CalendarProviderStatus {
+  provider: CalendarProvider;
+  name: string;
+  configured: boolean;
+  connected: boolean;
+  accountDisplayName?: string | null;
+  lastSyncedAt?: string | null;
+  lastError?: string | null;
 }
 export interface UserRecord {
   id: string;
@@ -202,6 +212,7 @@ export interface Task {
   status: "Open" | "Completed" | "Cancelled";
   createdAt: string;
   dueAt?: string | null;
+  taskType?: "Operational" | "LeadFollowUpCall";
 }
 export interface CompletedWorkItem {
   id: string;
@@ -530,6 +541,11 @@ export const api = {
         "/api/v1/auth/reset-password",
         json(payload),
       ),
+    verifyPassword: (currentPassword: string) =>
+      rawRequest<void>(
+        "/api/v1/auth/verify-password",
+        json({ currentPassword }),
+      ),
     changePassword: (payload: { currentPassword: string; newPassword: string }) =>
       rawRequest<LoginResponse>(
         "/api/v1/auth/change-password",
@@ -552,6 +568,18 @@ export const api = {
         `/api/v1/users/${id}/deactivate`,
         json({}),
       ),
+  },
+  calendar: {
+    connections: () =>
+      rawRequest<CalendarProviderStatus[]>("/api/v1/calendar/connections"),
+    authorize: (provider: CalendarProvider) =>
+      rawRequest<{ provider: CalendarProvider; authorizationUrl: string }>(
+        `/api/v1/calendar/${provider.toLowerCase()}/authorize`,
+      ),
+    disconnect: (provider: CalendarProvider) =>
+      rawRequest<void>(`/api/v1/calendar/${provider.toLowerCase()}`, {
+        method: "DELETE",
+      }),
   },
   reference: {
     pipelineStates: () =>

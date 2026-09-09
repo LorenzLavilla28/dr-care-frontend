@@ -322,6 +322,106 @@ a {
 .sidebar-bottom {
   margin-top: auto;
 }
+.user-menu[role="button"] { cursor: pointer; }
+.user-menu[role="button"]:focus-visible { outline: 2px solid #ff4d55; outline-offset: 2px; }
+.profile-layout { display: grid; gap: 16px; }
+.profile-information-card { padding: 20px; }
+.profile-section-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
+.profile-section-heading h2 { margin: 3px 0 0; }
+.profile-active-pill { display: inline-flex; align-items: center; gap: 5px; padding: 6px 10px; border-radius: 999px; background: #e9f8ef; color: #1a7b47; font-size: 10px; font-weight: 700; white-space: nowrap; }
+.profile-account-card { display: flex; align-items: center; gap: 14px; }
+.profile-account-avatar { width: 60px; height: 60px; flex-basis: 60px; border-radius: 50%; color: #fff; background: var(--red); font-size: 18px; }
+.profile-account-card .profile-account-avatar { width: 60px; height: 60px; flex-basis: 60px; border-radius: 50%; color: #fff; background: var(--red); font-size: 18px; font-weight: 700; }
+.profile-account-details h3 { margin: 0 0 4px; font-size: 16px; }
+.profile-account-details p { margin: 0 0 8px; }
+.profile-account-card > .profile-active-pill { margin-left: auto; }
+.profile-role-pill { display: inline-flex; padding: 4px 8px; border-radius: 999px; background: #fff0f0; color: #c5111b; font-size: 10px; font-weight: 700; }
+.profile-calendar-section { padding: 20px; }
+.profile-calendar-heading { margin-bottom: 16px; padding-bottom: 14px; border-bottom: 1px solid #edf0f3; }
+.profile-calendar-heading h2 { margin: 0 0 5px; font-size: 16px; }
+.profile-calendar-heading p { margin: 0; color: #637286; font-size: 11px; line-height: 1.5; }
+.profile-calendar-grid { display: grid; grid-template-columns: 1fr; gap: 10px; }
+.profile-calendar-row { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px; padding: 11px 12px; border: 1px solid #e3eaf1; border-radius: 11px; background: #f8fafc; }
+.profile-calendar-row.is-connected { border-color: #dce9e2; }
+.profile-calendar-service { display: flex; align-items: center; min-width: 0; gap: 12px; }
+.profile-calendar-logo { display: grid; place-items: center; flex: 0 0 auto; width: 36px; height: 36px; border: 1px solid #e0e7ee; border-radius: 9px; background: #fff; }
+.profile-calendar-logo.google { color: #4285f4; }
+.profile-calendar-logo.microsoft { color: #1677ed; }
+.profile-calendar-copy { min-width: 0; }
+.profile-calendar-copy h3 { margin: 0 0 3px; color: #1d3048; font-size: 13px; }
+.profile-calendar-copy p { overflow: hidden; margin: 0; color: #718096; font-size: 10px; line-height: 1.45; text-overflow: ellipsis; white-space: nowrap; }
+.profile-calendar-row-actions { display: flex; align-items: center; flex: 0 0 auto; gap: 18px; }
+.profile-calendar-status { display: inline-flex; align-items: center; gap: 5px; padding: 6px 9px; border-radius: 999px; background: #eef2f6; color: #748295; font-size: 10px; font-weight: 700; white-space: nowrap; }
+.profile-calendar-status.connected { background: #e8f7ee; color: #1a7b47; }
+.profile-calendar-status-dot { width: 7px; height: 7px; border-radius: 50%; background: #aeb9c5; }
+.profile-calendar-status.connected .profile-calendar-status-dot { background: #28ae6b; }
+.profile-calendar-buttons { display: flex; align-items: center; gap: 8px; }
+.profile-calendar-buttons .button { min-width: 84px; min-height: 34px; padding: 7px 13px; font-size: 11px; }
+.profile-calendar-disconnect { color: #c5111b; border-color: #f1bfc2; background: #fff; }
+.profile-calendar-disconnect:hover { background: #fff5f5; }
+.profile-calendar-row-error { flex-basis: 100%; margin: 0; }
+.calendar-consent-modal-copy { display: flex; align-items: flex-start; gap: 11px; padding: 14px; border: 1px solid #ffd4d6; border-radius: 10px; background: #fff7f7; color: #7e1c23; }
+.calendar-consent-modal-copy > svg { flex: 0 0 auto; color: #d90914; margin-top: 1px; }
+.calendar-consent-modal-copy strong { display: block; color: #64171d; font-size: 13px; }
+.calendar-consent-modal-copy p { margin: 6px 0 0; color: #7e1c23; font-size: 12px; line-height: 1.55; }
+.calendar-consent-check { display: flex; align-items: flex-start; gap: 10px; margin-top: 16px; color: #475467; font-size: 12px; line-height: 1.5; cursor: pointer; }
+.calendar-consent-check input { flex: 0 0 auto; width: 18px; height: 18px; margin: 0; accent-color: var(--red); }
+.calendar-consent-actions { margin-top: 20px; padding-top: 16px; border-top: 1px solid #edf0f3; }
+.calendar-disconnect-modal { width: min(440px, 100%); padding: 20px; border-radius: 10px; }
+.calendar-disconnect-modal .modal-header { margin-bottom: 14px; }
+.calendar-disconnect-modal .modal-heading-content.has-icon { display: block; }
+.calendar-disconnect-modal .modal-heading-icon { width: 44px; height: 44px; margin-bottom: 12px; color: #ef1b26; background: #ffebec; }
+.calendar-disconnect-modal .modal-header h2 { font-family: Georgia, "Times New Roman", serif; font-size: 20px; letter-spacing: -0.35px; }
+.calendar-disconnect-copy { color: #5d6d81; font-size: 13px; line-height: 1.45; }
+.calendar-disconnect-copy p { margin: 0; }
+.calendar-disconnect-copy p + p { margin-top: 16px; }
+.calendar-disconnect-actions { margin: 18px -20px -20px; padding: 14px 20px 20px; border-top: 1px solid #edf0f3; }
+.calendar-disconnect-actions .button { min-width: 89px; min-height: 36px; }
+.profile-security-section { padding: 20px; }
+.profile-security-row { display: grid; grid-template-columns: auto minmax(0, 1.5fr) minmax(130px, .7fr) auto; align-items: center; gap: 16px; }
+.profile-security-icon { display: grid; place-items: center; width: 42px; height: 42px; border-radius: 50%; color: #526274; background: #eef2f6; }
+.profile-security-copy h2 { margin: 3px 0 4px; font-size: 16px; }
+.profile-security-copy p { margin: 0; font-size: 11px; }
+.profile-security-value { display: grid; gap: 4px; padding-left: 16px; border-left: 1px solid #edf0f3; color: #8a96a3; font-size: 10px; }
+.profile-security-value strong { color: #26384c; letter-spacing: 2px; font-size: 13px; }
+.profile-password-button { white-space: nowrap; }
+.password-change-form { display: grid; gap: 15px; }
+.password-field { display: grid; gap: 7px; color: #526274; font-size: 11px; font-weight: 700; }
+.password-input-wrap { position: relative; }
+.password-input-wrap input { width: 100%; height: 35px; padding: 0 42px 0 10px; border: 1px solid #d8e0e8; border-radius: 6px; outline: none; color: #26384c; background: #fff; font-size: 12px; box-shadow: none; }
+.password-input-wrap input:focus { border-color: #9aafc1; box-shadow: 0 0 0 3px #eef4f8; }
+.password-visibility { position: absolute; top: 50%; right: 8px; display: grid; place-items: center; width: 30px; height: 30px; padding: 0; border: 0; border-radius: 6px; color: #7d8996; background: transparent; transform: translateY(-50%); cursor: pointer; }
+.password-visibility:hover { color: var(--red); background: #fff3f3; }
+.password-requirements { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 10px; padding: 4px 0 1px; color: #8a96a3; font-size: 11px; }
+.password-requirements span { display: inline-flex; align-items: center; gap: 5px; padding: 5px 7px; border-radius: 6px; background: #f6f8fa; }
+.password-requirements span.valid { color: #1a7b47; }
+.password-requirements span.valid { background: #effaf3; }
+.password-requirements svg { color: #1a9a58; }
+.password-requirement-dot { width: 7px; height: 7px; margin: 0 3px; border: 1px solid #b9c2cc; border-radius: 50%; }
+.password-match { font-size: 11px; }
+.password-match.valid { color: #1a7b47; }
+.password-match.invalid { color: #c5111b; }
+.password-modal-actions { margin: 4px -20px -20px; padding: 12px 20px 20px; border-top: 1px solid #edf0f3; }
+.password-modal-actions .button { min-height: 39px; }
+.password-change-modal { width: min(520px, 100%); padding: 20px; border-radius: 10px; }
+.password-change-modal .modal-header { margin-bottom: 18px; }
+.password-change-modal .modal-header h2 { font-size: 18px; letter-spacing: -0.25px; }
+.password-change-modal .modal-header p { margin-top: 5px; color: #8492a1; }
+.modal-heading-content { min-width: 0; }
+.modal-heading-content.has-icon { display: flex; align-items: flex-start; gap: 12px; }
+.modal-heading-icon { display: grid; place-items: center; flex: 0 0 auto; width: 40px; height: 40px; border-radius: 50%; color: #e21a24; background: #ffebec; }
+.success-banner { margin: 10px 0; border: 1px solid #bfe8cd; background: #effbf3; color: #19663c; border-radius: 8px; padding: 10px 12px; font-size: 12px; }
+@media (max-width: 760px) {
+  .profile-account-card { flex-wrap: wrap; }
+  .profile-account-card > .profile-active-pill { margin-left: 66px; }
+  .profile-calendar-grid { grid-template-columns: 1fr; }
+  .profile-calendar-row { align-items: flex-start; flex-direction: column; }
+  .profile-calendar-row-actions { justify-content: space-between; width: 100%; }
+  .profile-calendar-copy p { white-space: normal; }
+  .profile-security-row { grid-template-columns: auto minmax(0, 1fr); }
+  .profile-security-value { grid-column: 2; padding-left: 0; border-left: 0; }
+  .profile-password-button { grid-column: 2; justify-self: start; }
+}
 .user-menu span {
   display: flex;
   flex-direction: column;
@@ -3943,6 +4043,9 @@ a {
   .modal {
     padding: 18px;
   }
+  .password-change-modal { overflow-x: hidden; }
+  .password-change-modal .password-modal-actions { flex-direction: row; justify-content: flex-end; margin-left: -18px; margin-right: -18px; padding-left: 18px; padding-right: 18px; }
+  .password-change-modal .password-modal-actions .button { width: auto; }
   .lead-table-head,
   .lead-table-row {
     padding-left: 14px;
@@ -6197,6 +6300,80 @@ a {
   border-color: #f1c1c3;
   background: #fff8f8;
 }
+.filter-count-badge {
+  display: inline-grid;
+  min-width: 16px;
+  height: 16px;
+  margin-left: 1px;
+  padding: 0 4px;
+  place-items: center;
+  border-radius: 999px;
+  color: #fff;
+  background: var(--red);
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
+}
+.pipeline-owner-filter {
+  display: flex;
+  align-items: center;
+  min-width: 206px;
+  height: 38px;
+  gap: 5px;
+  padding: 0 9px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: #7d8994;
+  background: #fff;
+}
+.pipeline-owner-filter > svg {
+  flex: 0 0 auto;
+  color: #7d8994;
+}
+.pipeline-owner-label {
+  flex: 0 0 auto;
+  color: #7b8792;
+  font-size: 10px;
+  white-space: nowrap;
+}
+.pipeline-owner-filter .branded-select {
+  min-width: 92px;
+  width: auto;
+  flex: 1;
+}
+.pipeline-owner-filter .branded-select-trigger {
+  min-height: 34px;
+  padding: 0 1px;
+  border-color: transparent;
+  color: #4f5d6a;
+  background: transparent;
+  font-size: 10px;
+  font-weight: 600;
+}
+.pipeline-owner-filter .branded-select-trigger:hover:not(:disabled) {
+  border-color: transparent;
+}
+.pipeline-owner-filter:focus-within {
+  border-color: #ed7b80;
+  box-shadow: 0 0 0 3px #fff0f0;
+}
+.pipeline-owner-filter.has-value {
+  border-color: #f1c1c3;
+  color: var(--red);
+  background: #fff8f8;
+}
+.pipeline-owner-filter.has-value > svg,
+.pipeline-owner-filter.has-value .pipeline-owner-label,
+.pipeline-owner-filter.has-value .branded-select-trigger {
+  color: var(--red);
+}
+.pipeline-owner-filter.is-disabled {
+  background: #f7f9fa;
+  opacity: .75;
+}
+.pipeline-owner-menu .branded-select-option {
+  white-space: nowrap;
+}
 .view-segmented {
   display: inline-flex;
   align-items: center;
@@ -6209,11 +6386,13 @@ a {
 .view-segmented .view-toggle {
   height: 30px;
   min-width: 51px;
+  border: 1px solid transparent;
 }
 .view-segmented .view-toggle.active {
-  color: var(--ink);
-  background: #fff;
-  box-shadow: 0 1px 4px rgba(16, 24, 40, 0.1);
+  color: var(--red);
+  border-color: #f1c1c3;
+  background: #fff8f8;
+  box-shadow: none;
 }
 .quick-filter-row {
   display: flex;
@@ -6255,6 +6434,16 @@ a {
 .quick-filter.active span {
   color: #fff;
   background: var(--red);
+}
+.quick-filter-clear {
+  border-color: transparent;
+  color: #a05c61;
+  background: transparent;
+}
+.quick-filter-clear:hover {
+  border-color: #f1c1c3;
+  color: var(--red);
+  background: #fff8f8;
 }
 .not-interested-panel {
   padding: 0;
@@ -6591,6 +6780,10 @@ a {
   }
   .pipeline-toolbar .filter-toggle {
     flex: 1;
+  }
+  .pipeline-owner-filter {
+    flex: 1 1 100%;
+    min-width: 0;
   }
   .view-segmented {
     flex: 1;
