@@ -100,10 +100,6 @@ button {
   color: #8b97a3;
 }
 .branded-select-menu {
-  position: absolute;
-  top: calc(100% + 5px);
-  right: 0;
-  left: 0;
   display: grid;
   max-height: 280px;
   overflow-y: auto;
@@ -114,8 +110,7 @@ button {
   box-shadow: 0 13px 30px rgba(24, 32, 42, .15), 0 2px 7px rgba(24, 32, 42, .08);
 }
 .branded-select-menu-up {
-  top: auto;
-  bottom: calc(100% + 5px);
+  /* Placement is calculated by BrandedSelect because menus render above clipping containers. */
 }
 .branded-select-option {
   min-width: 0;

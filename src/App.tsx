@@ -3,12 +3,14 @@ import {
   useId,
   useRef,
   useState,
+  type CSSProperties,
   type ComponentType,
   type FormEvent,
   type PointerEvent as ReactPointerEvent,
   type RefObject,
   type ReactNode,
 } from "react";
+import { createPortal } from "react-dom";
 import { NavLink, Navigate, Route, Routes, useNavigate, useParams } from "react-router-dom";
 import {
   Activity,
@@ -100,24 +102,6 @@ type Notice = { message: string; tone?: "success" | "error" };
 type BrandedSelectOption = { value: string; label: ReactNode; disabled?: boolean };
 type BrandedSelectPlacement = "auto" | "down" | "up";
 
-function getDropdownBoundary(element: HTMLElement) {
-  let current = element.parentElement;
-  let top = 0;
-  let bottom = window.innerHeight;
-
-  while (current && current !== document.body) {
-    const styles = window.getComputedStyle(current);
-    if (/(auto|scroll|overlay|hidden|clip)/.test(`${styles.overflow} ${styles.overflowY}`)) {
-      const rect = current.getBoundingClientRect();
-      top = Math.max(top, rect.top);
-      bottom = Math.min(bottom, rect.bottom);
-    }
-    current = current.parentElement;
-  }
-
-  return { top, bottom };
-}
-
 function BrandedSelect({
   value,
   options,
@@ -149,6 +133,7 @@ function BrandedSelect({
   const [resolvedPlacement, setResolvedPlacement] = useState<Exclude<BrandedSelectPlacement, "auto">>(
     menuPlacement === "up" ? "up" : "down",
   );
+  const [menuLayout, setMenuLayout] = useState<CSSProperties | null>(null);
   const selectedIndex = options.findIndex((option) => option.value === value);
   const firstEnabledIndex = options.findIndex((option) => !option.disabled);
   const [activeIndex, setActiveIndex] = useState(
@@ -158,9 +143,14 @@ function BrandedSelect({
   const activeOptionId = `${selectId}-option-${Math.max(activeIndex, 0)}`;
 
   useEffect(() => {
-    if (!open || menuPlacement !== "auto") {
+    if (!open) {
+      setMenuLayout(null);
       setResolvedPlacement(menuPlacement === "up" ? "up" : "down");
       return;
+    }
+
+    if (menuPlacement !== "auto") {
+      setResolvedPlacement(menuPlacement === "up" ? "up" : "down");
     }
 
     const updatePlacement = () => {
@@ -169,7 +159,6 @@ function BrandedSelect({
       if (!trigger || !menu) return;
 
       const triggerRect = trigger.getBoundingClientRect();
-      const boundary = getDropdownBoundary(trigger);
       const menuStyles = window.getComputedStyle(menu);
       const maxHeight = Number.parseFloat(menuStyles.maxHeight);
       const menuHeight = Math.min(
@@ -177,19 +166,51 @@ function BrandedSelect({
         Number.isFinite(maxHeight) ? maxHeight : menu.scrollHeight,
       );
       const gap = 5;
-      const spaceAbove = Math.max(0, triggerRect.top - boundary.top - gap);
-      const spaceBelow = Math.max(0, boundary.bottom - triggerRect.bottom - gap);
+      const viewportPadding = 8;
+      const spaceAbove = Math.max(0, triggerRect.top - viewportPadding - gap);
+      const spaceBelow = Math.max(0, window.innerHeight - triggerRect.bottom - viewportPadding - gap);
       const fitsAbove = spaceAbove >= menuHeight;
       const fitsBelow = spaceBelow >= menuHeight;
-      const nextPlacement = fitsBelow || (!fitsAbove && spaceBelow >= spaceAbove) ? "down" : "up";
+      const nextPlacement = menuPlacement === "up"
+        ? "up"
+        : menuPlacement === "down"
+          ? "down"
+          : fitsBelow || (!fitsAbove && spaceBelow >= spaceAbove)
+            ? "down"
+            : "up";
+      const availableSpace = nextPlacement === "up" ? spaceAbove : spaceBelow;
+      const visibleMenuHeight = Math.max(
+        48,
+        Math.min(menuHeight || 280, 280, Math.max(48, availableSpace)),
+      );
+      const unclampedTop = nextPlacement === "up"
+        ? triggerRect.top - gap - visibleMenuHeight
+        : triggerRect.bottom + gap;
+      const top = nextPlacement === "up"
+        ? Math.max(viewportPadding, unclampedTop)
+        : Math.min(unclampedTop, Math.max(viewportPadding, window.innerHeight - viewportPadding - visibleMenuHeight));
+      const left = Math.min(
+        Math.max(viewportPadding, triggerRect.left),
+        Math.max(viewportPadding, window.innerWidth - triggerRect.width - viewportPadding),
+      );
 
       setResolvedPlacement((current) => current === nextPlacement ? current : nextPlacement);
+      setMenuLayout({
+        position: "fixed",
+        top,
+        left,
+        width: triggerRect.width,
+        maxHeight: visibleMenuHeight,
+        zIndex: 1200,
+        visibility: "visible",
+      });
     };
 
-    updatePlacement();
+    const frame = window.requestAnimationFrame(updatePlacement);
     window.addEventListener("resize", updatePlacement);
     window.addEventListener("scroll", updatePlacement, true);
     return () => {
+      window.cancelAnimationFrame(frame);
       window.removeEventListener("resize", updatePlacement);
       window.removeEventListener("scroll", updatePlacement, true);
     };
@@ -198,7 +219,8 @@ function BrandedSelect({
   useEffect(() => {
     if (!open) return;
     const closeOnOutsidePointer = (event: PointerEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+      const target = event.target as Node;
+      if (!rootRef.current?.contains(target) && !menuRef.current?.contains(target)) setOpen(false);
     };
     document.addEventListener("pointerdown", closeOnOutsidePointer);
     return () => document.removeEventListener("pointerdown", closeOnOutsidePointer);
@@ -295,8 +317,22 @@ function BrandedSelect({
         </span>
         <ChevronDown size={16} aria-hidden="true" />
       </button>
-      {open && (
-        <div ref={menuRef} className={`branded-select-menu ${resolvedPlacement === "up" ? "branded-select-menu-up" : ""}`} id={`${selectId}-listbox`} role="listbox" aria-label={ariaLabel}>
+      {open && createPortal(
+        <div
+          ref={menuRef}
+          className={`branded-select-menu ${resolvedPlacement === "up" ? "branded-select-menu-up" : ""}`}
+          id={`${selectId}-listbox`}
+          role="listbox"
+          aria-label={ariaLabel}
+          style={menuLayout ?? {
+            position: "fixed",
+            top: triggerRef.current ? triggerRef.current.getBoundingClientRect().bottom + 5 : 0,
+            left: triggerRef.current ? triggerRef.current.getBoundingClientRect().left : 0,
+            width: triggerRef.current ? triggerRef.current.getBoundingClientRect().width : 0,
+            zIndex: 1200,
+            visibility: "hidden",
+          }}
+        >
           {options.map((option, index) => (
             <div
               className={`branded-select-option ${index === activeIndex ? "active" : ""} ${option.value === value ? "selected" : ""}`}
@@ -319,7 +355,8 @@ function BrandedSelect({
               {option.label}
             </div>
           ))}
-        </div>
+        </div>,
+        document.body,
       )}
       {required && <input className="branded-select-validation" tabIndex={-1} aria-hidden="true" value={value} onChange={() => undefined} required />}
     </div>
