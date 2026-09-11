@@ -5720,7 +5720,6 @@ function InquiryPanel({
 
   const missing = [
     form.fullName.trim() ? null : "Full name",
-    form.birthDate.trim() ? null : "Birthdate",
     form.contactNumber.trim() ? null : "Contact number",
     form.email.trim() ? null : "Email",
     form.sourceOfIncome.trim() ? null : "Source of income",
@@ -5778,7 +5777,7 @@ function InquiryPanel({
         {(
           [
             ["fullName", "Full name", true],
-            ["birthDate", "Birthdate", true],
+            ["birthDate", "Birthdate", false],
             ["contactNumber", "Contact number", true],
             ["email", "Email", true],
             ["meetingDateTime", "Meeting date and time", false],
@@ -5801,7 +5800,7 @@ function InquiryPanel({
                 required={required}
                 invalid={attempted && invalidBirthDate}
                 selectedLabel="Birthdate"
-                emptyLabel="Required · choose birthdate"
+                emptyLabel="Optional · choose birthdate"
                 clearLabel="Clear birthdate"
               />
             ) : key === "meetingDateTime" ? (
